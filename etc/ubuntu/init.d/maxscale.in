@@ -53,11 +53,15 @@ DAEMON=$MAXSCALE_HOME/bin/maxscale
 # we can rearrange this easily
 processname=maxscale
 servicename=maxscale
+ulimitfile=100000
 
 RETVAL=0
 
 start() {
         log_daemon_msg "Starting MaxScale"
+	
+	ulimit -n $ulimitfile
+
         start_daemon -p $MAXSCALE_PIDFILE $DAEMON 2> /dev/null
 
         sleep 2

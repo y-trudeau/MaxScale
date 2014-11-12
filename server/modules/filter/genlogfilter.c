@@ -546,7 +546,7 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 	GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
 	GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
 	struct		timeval		tv, diff;
-	char		*printformat = "%lu,%.3f,%s,%s,%d,%s\n";
+	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d\n%s\n";
 
 	if (my_session->current && my_session->isLogging == 1)
 	{
@@ -565,20 +565,21 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
       		free(my_session->writeBuffer);
 		*/
 
-		/*simple_mutex_lock(&my_instance->writeBufferLock, true);*/
+		/*simple_mutex_lock(&my_instance->writeBufferLock, true); broken? */
 		pthread_mutex_lock(&my_instance->writeBufferLock);
 		if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
 		
+      /* Every 2s, close/open the log file for easy manipulation/rotation */
 		if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
 			fclose(my_instance->fp);
 			my_instance->fp = fopen(my_instance->filepath,"a");
 			gettimeofday(&my_instance->lastFlush, NULL);
 		}
 		fprintf(my_instance->fp,printformat,tv.tv_sec, 
-         		(double)((diff.tv_sec * 1000)+(diff.tv_usec / 1000)) / 1000,my_session->userName,my_session->clientHost,my_session->sessionId,my_session->current);
+         		(double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,my_session->userName,my_session->clientHost,my_session->sessionId,my_session->current);
 		pthread_mutex_unlock(&my_instance->writeBufferLock);
 
-/*		simple_mutex_unlock(&my_instance->writeBufferLock);*/
+/*		simple_mutex_unlock(&my_instance->writeBufferLock); */
 
 		free(my_session->current);
       		my_session->writeBuffer = NULL;
