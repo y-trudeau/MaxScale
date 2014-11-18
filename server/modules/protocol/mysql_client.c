@@ -487,8 +487,19 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
 
 	if (auth_ret == 0)
 	{
+      LOGIF(LD, (skygw_log_write(
+        LOGFILE_DEBUG,
+        "gw_mysql_do_authentication, user = %s, host = %s, "
+        "state = MYSQL_AUTH_SUCCESS.",
+        username,dcb->remote)));
 		dcb->user = strdup(client_data->user);
-	}
+	} else {
+      LOGIF(LD, (skygw_log_write(
+        LOGFILE_DEBUG,
+        "gw_mysql_do_authentication, user = %s, host = %s, "
+        "state = MYSQL_AUTH_FAILED.",
+        username,dcb->remote)));
+   }
 
 	return auth_ret;
 }
@@ -601,8 +612,11 @@ int gw_read_client_event(
                 
                 if (auth_val == 0)
                 {
+                        
                         SESSION *session = NULL;
                         protocol->protocol_auth_state = MYSQL_AUTH_RECV;
+
+                                        
                         /**
                          * Create session, and a router session for it.
                          * If successful, there will be backend connection(s)

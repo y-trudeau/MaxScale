@@ -99,6 +99,7 @@ typedef struct {
 	regex_t	re_host;		/* Compiled regex for host */
    	regex_t	re_user;		/* Compiled regex for user */
    	regex_t	re_sql;		/* Compiled regex for sql */
+   char  *applname;       /* a prefix to sort the source of the log*/
 } GENLOG_INSTANCE;
 
 /**
@@ -177,6 +178,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 	 	my_instance->bufpos = 0;
       		gettimeofday(&my_instance->lastFlush, NULL);
 		my_instance->filepath = strdup("/tmp/MaxScale_genlog.log");
+      my_instance->applname = strdup("MaxScale");
 		my_instance->buffer = NULL;
 		my_instance->host_re_def = NULL;
 		my_instance->user_re_def = NULL;
@@ -194,6 +196,11 @@ createInstance(char **options, FILTER_PARAMETER **params)
 			{
 				free(my_instance->filepath);
 				my_instance->filepath = strdup(params[i]->value);
+			}
+         else if (!strcmp(params[i]->name, "applname"))
+			{
+				free(my_instance->applname);
+				my_instance->applname = strdup(params[i]->value);
 			}
 			else if (!strcmp(params[i]->name, "host_re"))
 			{
@@ -546,7 +553,7 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 	GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
 	GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
 	struct		timeval		tv, diff;
-	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d\n%s\n";
+	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d   Appl:%s\n%s\n";
 
 	if (my_session->current && my_session->isLogging == 1)
 	{
@@ -576,7 +583,7 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 			gettimeofday(&my_instance->lastFlush, NULL);
 		}
 		fprintf(my_instance->fp,printformat,tv.tv_sec, 
-         		(double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,my_session->userName,my_session->clientHost,my_session->sessionId,my_session->current);
+         		(double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,my_session->userName,my_session->clientHost,my_session->sessionId,my_instance->applname,my_session->current);
 		pthread_mutex_unlock(&my_instance->writeBufferLock);
 
 /*		simple_mutex_unlock(&my_instance->writeBufferLock); */
