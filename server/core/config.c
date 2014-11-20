@@ -37,7 +37,8 @@
  * 28/08/14	Massimiliano Pinto	Added detect_stale_master parameter
  * 09/09/14	Massimiliano Pinto	Added localhost_match_wildcard_host parameter
  * 12/09/14	Mark Riddoch		Addition of checks on servers list and
- *					internal router suppression of messages
+ *					               internal router suppression of messages
+ * 19/11/14 Yves Trudeau      Added kafka options
  *
  * @endverbatim
  */
@@ -1106,6 +1107,18 @@ config_threadcount()
 	return gateway.n_threads;
 }
 
+/**
+ * Return the kafka options, the format is "option1=value1;option2=value2"
+ *
+ * @return The kafka options configured in the config file
+ */
+char *
+config_kafka_options()
+{
+	return gateway.kafka_options;
+}
+
+
 static struct {
 	char		*logname;
 	logfile_id_t	logfile;
@@ -1128,7 +1141,9 @@ handle_global_item(const char *name, const char *value)
 int i;
 	if (strcmp(name, "threads") == 0) {
 		gateway.n_threads = atoi(value);
-        } else {
+   } else if (!strcmp(name, "kafka_options")) {
+      gateway.kafka_options = strdup(value);
+   } else {
 		for (i = 0; lognames[i].logname; i++)
 		{
 			if (strcasecmp(name, lognames[i].logname) == 0)
@@ -1150,6 +1165,7 @@ static void
 global_defaults()
 {
 	gateway.n_threads = 1;
+   gateway.kafka_options = NULL;
 	if (version_string != NULL)
 		gateway.version_string = strdup(version_string);
 	else

@@ -42,9 +42,12 @@
 #include <time.h>
 #include <sys/time.h>
 #include <regex.h>
+#include <kafka.h>
 
 #define USE_RE 0
+
 extern int lm_enabled_logfiles_bitmask;
+extern int hasKafka;
 
 MODULE_INFO 	info = {
 	MODULE_API_FILTER,
@@ -91,14 +94,15 @@ typedef struct {
 	int   buffer_size;  /* buffer size in MB */
 	size_t  bufpos; /* Used amount in the buffer */
 	char  *buffer;  /* Write buffer */
+   int   queriesLogged;  /* number of queries logged */
 	struct timeval	lastFlush; /* last flush ops */
-   	pthread_mutex_t  writeBufferLock; /* mutex protecting the write buffer */
+   pthread_mutex_t  WriteLock; /* mutex protecting the write buffer and fp*/
 	char	*host_re_def;	   /* host regex */
 	char	*user_re_def;		/* user regex */
 	char	*sql_re_def;		/* sql regex */
 	regex_t	re_host;		/* Compiled regex for host */
-   	regex_t	re_user;		/* Compiled regex for user */
-   	regex_t	re_sql;		/* Compiled regex for sql */
+   regex_t	re_user;		/* Compiled regex for user */
+   regex_t	re_sql;		/* Compiled regex for sql */
    char  *applname;       /* a prefix to sort the source of the log*/
 } GENLOG_INSTANCE;
 
@@ -120,7 +124,7 @@ typedef struct {
 	char		*clientHost;
 	char		*userName;
 	char		*current;
-   char     *writeBuffer;
+   char     *writeBuffer;  /* allocated/deallocated in ClientReply */
 } GENLOG_SESSION;
 
 /**
@@ -174,6 +178,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 
 	if ((my_instance = calloc(1, sizeof(GENLOG_INSTANCE))) != NULL)
 	{      
+      my_instance->queriesLogged = 0;
 		my_instance->buffer_size = 1;
 	 	my_instance->bufpos = 0;
       		gettimeofday(&my_instance->lastFlush, NULL);
@@ -183,7 +188,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 		my_instance->host_re_def = NULL;
 		my_instance->user_re_def = NULL;
       		my_instance->sql_re_def = NULL;
-		pthread_mutex_init(&my_instance->writeBufferLock, NULL);
+		pthread_mutex_init(&my_instance->WriteLock, NULL);
       
 		for (i = 0; params && params[i]; i++)
 		{
@@ -245,7 +250,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				free(my_instance->user_re_def);
 				free(my_instance->sql_re_def);
 				free(my_instance->filepath);
-		 		pthread_mutex_destroy(&my_instance->writeBufferLock);
+		 		pthread_mutex_destroy(&my_instance->WriteLock);
 				free(my_instance);
 				return NULL;
 			}
@@ -262,7 +267,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				free(my_instance->user_re_def);
 				free(my_instance->sql_re_def);
 				free(my_instance->filepath);
-		 		pthread_mutex_destroy(&my_instance->writeBufferLock);
+		 		pthread_mutex_destroy(&my_instance->WriteLock);
 				free(my_instance);
 				return NULL;
 			}
@@ -281,14 +286,14 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				free(my_instance->user_re_def);
 				free(my_instance->sql_re_def);
 				free(my_instance->filepath);
-		 		pthread_mutex_destroy(&my_instance->writeBufferLock);
+		 		pthread_mutex_destroy(&my_instance->WriteLock);
 				free(my_instance);
 				return NULL;
 			}
 		}
-      		if ((my_instance->buffer = malloc(my_instance->buffer_size*1024+1)) 
-            			== NULL) 
-      		{
+         if ((my_instance->buffer = malloc(my_instance->buffer_size*1024+1)) 
+                  == NULL) 
+         {
 			LOGIF(LE, (skygw_log_write_flush(LOGFILE_ERROR,
 				"genfilter: Couldn't allocate the write buffer"
 				" os size %i\n",
@@ -301,7 +306,7 @@ createInstance(char **options, FILTER_PARAMETER **params)
 			free(my_instance->user_re_def);
 			free(my_instance->sql_re_def);
 			free(my_instance->filepath);
-	 		pthread_mutex_destroy(&my_instance->writeBufferLock);
+	 		pthread_mutex_destroy(&my_instance->WriteLock);
 			free(my_instance);
 			return NULL;
 		}
@@ -499,54 +504,6 @@ routeQuery(FILTER *instance, void *session, GWBUF *queue)
 			my_session->down.session, queue);
 }
 
-/**
- * doBufferedWrite routine
- *
- * Write the log to the instance buffer, flush to the file is 
- * the buffer is full.
- *
- * @param	instance	The filter instance
- * @param	fsession	Filter session, may be NULL
- * @param	inbuffer	Buffer to write
- * @param   len      length of the buffer
- * @param   flag     currently only implementing 1, force flush
- */
-static void 
-doBufferedWrite(GENLOG_INSTANCE *instance, char *inbuffer, size_t len, int flag)
-{
-   GENLOG_INSTANCE *my_instance = (GENLOG_INSTANCE *)instance;
-   size_t real_buffer_size;
-   
-   real_buffer_size = my_instance->buffer_size*1024;
-   
-   if ((len + 1) > real_buffer_size) /* 1 is for \n */
-   {
-      /* too large, need to truncate */
-      len = real_buffer_size - 1;
-   }
-
-   pthread_mutex_lock(&my_instance->writeBufferLock);
-   /* Enough room in the buffer? */
-   if ((my_instance->bufpos + len + 1) < real_buffer_size && flag == 0) 
-   {
-      strncat(my_instance->buffer,inbuffer,len);
-      my_instance->bufpos += len;
-      strncat(my_instance->buffer,"\n",1);
-      my_instance->bufpos++;
-   } else {
-      /* need to flush first */
-      my_instance->fp = fopen(my_instance->filepath,"a");
-      fwrite(my_instance->buffer,1,my_instance->bufpos,my_instance->fp);
-      fclose(my_instance->fp);
-      strncpy(my_instance->buffer,inbuffer,len);
-      my_instance->bufpos = len;
-      strncat(my_instance->buffer,"\n",1);
-      my_instance->bufpos++;
-      gettimeofday(&my_instance->lastFlush, NULL);
-   }
-   pthread_mutex_unlock(&my_instance->writeBufferLock);
-}
-
 static int
 clientReply(FILTER *instance, void *session, GWBUF *reply)
 {
@@ -554,48 +511,64 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 	GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
 	struct		timeval		tv, diff;
 	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d   Appl:%s\n%s\n";
-
+      
 	if (my_session->current && my_session->isLogging == 1)
 	{
 		gettimeofday(&tv, NULL);
 		timersub(&tv, &(my_session->start), &diff);				
 
-		/*		
-      		size_t needed = snprintf(NULL, 0, printformat, my_session->start.tv_sec, 
-         		(double)((diff.tv_sec * 1000)+(diff.tv_usec / 1000)) / 1000,my_session->userName,my_session->clientHost,my_session->sessionId,my_session->current) + 1;
-      		my_session->writeBuffer = (char*) calloc(1,needed);
-      		snprintf(my_session->writeBuffer, needed, printformat, my_session->start.tv_sec, 
-         		(double)((diff.tv_sec * 1000)+(diff.tv_usec / 1000)) / 1000,my_session->userName,my_session->clientHost,my_session->sessionId,my_session->current);
-		
-      		doBufferedWrite(my_instance, my_session->writeBuffer,needed,0);
-      
-      		free(my_session->writeBuffer);
-		*/
+      /* approximate size, don't care to overshoot a bit */
+      LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+               "[GENLOG] clientReply: Allocating a writeBuffer of %i\n",
+					strlen(printformat)+
+               strlen(my_session->userName)+strlen(my_session->clientHost)
+               +strlen(my_instance->applname)+strlen(my_session->current)+30)));
+      if ((my_session->writeBuffer = malloc(strlen(printformat)+
+            strlen(my_session->userName)+strlen(my_session->clientHost)
+            +strlen(my_instance->applname)+strlen(my_session->current)+30)) == NULL)
+            /* 30 approx fro num fields */
+      {
+               LOGIF(LE, (skygw_log_write_flush(LOGFILE_ERROR,
+               "genfilter: Couldn't allocate the write buffer"
+               " os size %i\n",
+					strlen(printformat)+
+               strlen(my_session->userName)+strlen(my_session->clientHost)
+               +strlen(my_instance->applname)+strlen(my_session->current)+30)));
+      }
+      else
+      {
+         sprintf(my_session->writeBuffer,printformat,tv.tv_sec, 
+               (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
+               my_session->userName,my_session->clientHost,my_session->sessionId,
+               my_instance->applname,my_session->current);      
 
-		/*simple_mutex_lock(&my_instance->writeBufferLock, true); broken? */
-		pthread_mutex_lock(&my_instance->writeBufferLock);
-		if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
-		
-      /* Every 2s, close/open the log file for easy manipulation/rotation */
-		if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
-			fclose(my_instance->fp);
-			my_instance->fp = fopen(my_instance->filepath,"a");
-			gettimeofday(&my_instance->lastFlush, NULL);
-		}
-		fprintf(my_instance->fp,printformat,tv.tv_sec, 
-         		(double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,my_session->userName,my_session->clientHost,my_session->sessionId,my_instance->applname,my_session->current);
-		pthread_mutex_unlock(&my_instance->writeBufferLock);
-
-/*		simple_mutex_unlock(&my_instance->writeBufferLock); */
-
-		free(my_session->current);
-      		my_session->writeBuffer = NULL;
-		my_session->current = NULL;
+         if (hasKafka) {
+            if (kafkaProduce(my_session->writeBuffer,strlen(my_session->writeBuffer)))
+               atomic_add(&my_instance->queriesLogged, 1);
+               /* no need to free writeBuffer, the kafka library is freeing */
+         }
+         else
+         {
+            pthread_mutex_lock(&my_instance->WriteLock);
+            if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
+            
+            /* Every 2s, close/open the log file for easy manipulation/rotation */
+            if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
+               fclose(my_instance->fp);
+               my_instance->fp = fopen(my_instance->filepath,"a");
+               gettimeofday(&my_instance->lastFlush, NULL);
+            }
+            fputs(my_session->writeBuffer,my_instance->fp);
+            pthread_mutex_unlock(&my_instance->WriteLock);
+            atomic_add(&my_instance->queriesLogged, 1);
+            free(my_session->writeBuffer);
+         }
+      }
 	}
 
+   my_session->writeBuffer = NULL;
 	free(my_session->current);
 	my_session->current = NULL;
-
 
 	/* Pass the result upstream */
 	return my_session->up.clientReply(my_session->up.instance,
@@ -630,14 +603,19 @@ diagnostic(FILTER *instance, void *fsession, DCB *dcb)
 	if (my_instance->sql_re_def)
 		dcb_printf(dcb, "\t\tSql matching regex 	%s\n",
 				my_instance->sql_re_def);
-	if (my_instance->filepath)
-		dcb_printf(dcb, "\t\tLogging to file		%s\n",
-				my_instance->filepath);
-   
-   	dcb_printf(dcb, "\t\tData len in buffer		%lu\n",
-		my_instance->bufpos);         
-            
-	dcb_printf(dcb, "\t\tLast buffer flush		%s\n",
-		asctime(localtime(&my_instance->lastFlush.tv_sec)));         
+   if (hasKafka) {
+      dcb_printf(dcb, "\t\tLogging to Kakfa\n");   
+   }
+   else
+   {
+      if (my_instance->filepath)
+         dcb_printf(dcb, "\t\tLogging to file		%s\n",
+               my_instance->filepath);
+                  
+      dcb_printf(dcb, "\t\tLast buffer flush		%s\n",
+         asctime(localtime(&my_instance->lastFlush.tv_sec)));
+   }
+   dcb_printf(dcb, "\t\tNumber of queries logged:	%i\n",
+      my_instance->queriesLogged);
    
 }

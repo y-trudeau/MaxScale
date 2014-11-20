@@ -53,6 +53,7 @@
 #include <config.h>
 #include <poll.h>
 #include <housekeeper.h>
+#include <kafka.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -943,34 +944,34 @@ static void usage(void)
  */
 int main(int argc, char **argv)
 {
-        int      rc = MAXSCALE_SHUTDOWN;
-        int 	 l;
-        int	 i;
-        int      n;
-        int      n_threads; /*< number of epoll listener threads */ 
-        int      n_services;
-        int      eno = 0;   /*< local variable for errno */
-        int      opt;
-        void**	 threads;   /*< thread list */
-        char	 mysql_home[PATH_MAX+1];
-        char	 datadir_arg[10+PATH_MAX+1];  /*< '--datadir='  + PATH_MAX */
-        char     language_arg[11+PATH_MAX+1]; /*< '--language=' + PATH_MAX */
-        char*    home_dir = NULL;             /*< home dir, to be freed */
-        char*    cnf_file_path = NULL;        /*< conf file, to be freed */
-        char*    cnf_file_arg = NULL;         /*< conf filename from cmd-line arg */
-        void*    log_flush_thr = NULL;
+   int      rc = MAXSCALE_SHUTDOWN;
+   int 	 l;
+   int	 i;
+   int      n;
+   int      n_threads; /*< number of epoll listener threads */ 
+   int      n_services;
+   int      eno = 0;   /*< local variable for errno */
+   int      opt;
+   void**	threads;   /*< thread list */
+   char	   mysql_home[PATH_MAX+1];
+   char	   datadir_arg[10+PATH_MAX+1];  /*< '--datadir='  + PATH_MAX */
+   char     language_arg[11+PATH_MAX+1]; /*< '--language=' + PATH_MAX */
+   char*    home_dir = NULL;             /*< home dir, to be freed */
+   char*    cnf_file_path = NULL;        /*< conf file, to be freed */
+   char*    cnf_file_arg = NULL;         /*< conf filename from cmd-line arg */
+   void*    log_flush_thr = NULL;
 	int      option_index;
-	int	 logtofile = 0;	      	      /* Use shared memory or file */
-        ssize_t  log_flush_timeout_ms = 0;
-        sigset_t sigset;
-        sigset_t sigpipe_mask;
-        sigset_t saved_mask;
-        void   (*exitfunp[4])(void) = {skygw_logmanager_exit,
-                                       datadir_cleanup,
-                                       write_footer,
-                                       NULL};
-        sigemptyset(&sigpipe_mask);
-        sigaddset(&sigpipe_mask, SIGPIPE);
+	int      logtofile = 0;	      	      /* Use shared memory or file */
+   ssize_t  log_flush_timeout_ms = 0;
+   sigset_t sigset;
+   sigset_t sigpipe_mask;
+   sigset_t saved_mask;
+   void   (*exitfunp[4])(void) = {skygw_logmanager_exit,
+                                 datadir_cleanup,
+                                 write_footer,
+                                 NULL};
+   sigemptyset(&sigpipe_mask);
+   sigaddset(&sigpipe_mask, SIGPIPE);
 
 	progname = *argv;
 
@@ -1576,6 +1577,12 @@ int main(int argc, char **argv)
                 log_flush_cb,
                 (void *)&log_flush_timeout_ms);
 
+   /* 
+    * Start the handle to Kafka for logging
+    */
+   if (config_kafka_options()) 
+      kafkaInit();
+   
 	/*
 	 * Start the housekeeper thread
 	 */
@@ -1645,6 +1652,7 @@ return_main:
 void
         shutdown_server()
 {
+        kafkaShutdown();
         poll_shutdown();
         log_flush_shutdown();
 }

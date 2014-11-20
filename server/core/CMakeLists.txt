@@ -5,8 +5,8 @@ target_link_libraries(fullcore log_manager utils pthread ${EMBEDDED_LIB} ssl aio
 add_executable(maxscale atomic.c buffer.c spinlock.c gateway.c
 	gw_utils.c utils.c dcb.c load_utils.c session.c service.c server.c 
 	poll.c config.c users.c hashtable.c dbusers.c thread.c gwbitmask.c 
-	monitor.c adminusers.c secrets.c filter.c modutil.c hint.c housekeeper.c)
-target_link_libraries(maxscale ${EMBEDDED_LIB} log_manager utils ssl aio pthread crypt dl crypto inih z rt m stdc++)
+	monitor.c adminusers.c secrets.c filter.c modutil.c hint.c housekeeper.c kafka.c)
+target_link_libraries(maxscale ${EMBEDDED_LIB} log_manager utils ssl aio pthread crypt dl crypto inih z rt m stdc++ rdkafka)
 install(TARGETS maxscale DESTINATION bin)
 
 add_executable(maxkeys maxkeys.c secrets.c utils.c)

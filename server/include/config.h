@@ -90,6 +90,7 @@ typedef struct	config_context {
  */
 typedef struct {
 	int			n_threads;		/**< Number of polling threads */
+   char        *kafka_options;
 	char			*version_string;	/**< The version string of embedded database library */
 	unsigned long		id;			/**< MaxScale ID */
 } GATEWAY_CONF;
@@ -100,6 +101,7 @@ extern int	    config_threadcount();
 CONFIG_PARAMETER*   config_get_param(CONFIG_PARAMETER* params, const char* name);
 config_param_type_t config_get_paramtype(CONFIG_PARAMETER* param);
 CONFIG_PARAMETER*   config_clone_param(CONFIG_PARAMETER* param);
+extern char * config_kafka_options();
 
 bool config_set_qualified_param(
         CONFIG_PARAMETER* param, 
