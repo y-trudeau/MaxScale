@@ -43,6 +43,8 @@
 #include <gw.h>
 #include <modinfo.h>
 #include <sys/stat.h>
+#include <jansson.h>
+#include <kafka.h>
 
 MODULE_INFO info = {
 	MODULE_API_PROTOCOL,
@@ -52,6 +54,7 @@ MODULE_INFO info = {
 };
 
 extern int lm_enabled_logfiles_bitmask;
+extern int hasKafka;
 
 static char *version_str = "V1.0.0";
 
@@ -68,6 +71,9 @@ int mysql_send_ok(DCB *dcb, int packet_number, int in_affected_rows, const char*
 int MySQLSendHandshake(DCB* dcb);
 static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue);
 static int route_by_statement(SESSION *, GWBUF **);
+
+json_t   *jsonObj = NULL;  /* for auth loggging to kafka */
+pthread_mutex_t  jsonObjLock; /* mutex protecting the jsonObj */
 
 /*
  * The "module object" for the mysqld client protocol module.
@@ -104,6 +110,7 @@ version()
 void
 ModuleInit()
 {
+   pthread_mutex_init(&jsonObjLock, NULL);
 }
 
 /**
@@ -213,23 +220,23 @@ mysql_send_ok(DCB *dcb, int packet_number, int in_affected_rows, const char* mys
 int
 MySQLSendHandshake(DCB* dcb)
 {
-        uint8_t *outbuf = NULL;
-        uint8_t mysql_payload_size = 0;
-        uint8_t mysql_packet_header[4];
-        uint8_t mysql_packet_id = 0;
-        uint8_t mysql_filler = GW_MYSQL_HANDSHAKE_FILLER;
-        uint8_t mysql_protocol_version = GW_MYSQL_PROTOCOL_VERSION;
-        uint8_t *mysql_handshake_payload = NULL;
-        uint8_t mysql_thread_id[4];
-        uint8_t mysql_scramble_buf[9] = "";
-        uint8_t mysql_plugin_data[13] = "";
-        uint8_t mysql_server_capabilities_one[2];
-        uint8_t mysql_server_capabilities_two[2];
-        uint8_t mysql_server_language = 8;
-        uint8_t mysql_server_status[2];
-        uint8_t mysql_scramble_len = 21;
-        uint8_t mysql_filler_ten[10];
-        uint8_t mysql_last_byte = 0x00;
+   uint8_t *outbuf = NULL;
+   uint8_t mysql_payload_size = 0;
+   uint8_t mysql_packet_header[4];
+   uint8_t mysql_packet_id = 0;
+   uint8_t mysql_filler = GW_MYSQL_HANDSHAKE_FILLER;
+   uint8_t mysql_protocol_version = GW_MYSQL_PROTOCOL_VERSION;
+   uint8_t *mysql_handshake_payload = NULL;
+   uint8_t mysql_thread_id[4];
+   uint8_t mysql_scramble_buf[9] = "";
+   uint8_t mysql_plugin_data[13] = "";
+   uint8_t mysql_server_capabilities_one[2];
+   uint8_t mysql_server_capabilities_two[2];
+   uint8_t mysql_server_language = 8;
+   uint8_t mysql_server_status[2];
+   uint8_t mysql_scramble_len = 21;
+   uint8_t mysql_filler_ten[10];
+   uint8_t mysql_last_byte = 0x00;
 	char server_scramble[GW_MYSQL_SCRAMBLE_SIZE + 1]="";
 	char *version_string;
 	int len_version_string=0;
@@ -255,17 +262,17 @@ MySQLSendHandshake(DCB* dcb)
 
 	memset(&mysql_filler_ten, 0x00, sizeof(mysql_filler_ten));
 
-        // thread id, now put thePID
-        gw_mysql_set_byte4(mysql_thread_id, getpid() + dcb->fd);
-	
-        memcpy(mysql_scramble_buf, server_scramble, 8);
+   // thread id, now put thePID
+   gw_mysql_set_byte4(mysql_thread_id, getpid() + dcb->fd);
 
-        memcpy(mysql_plugin_data, server_scramble + 8, 12);
+   memcpy(mysql_scramble_buf, server_scramble, 8);
 
-        mysql_payload_size  = sizeof(mysql_protocol_version) + (len_version_string + 1) + sizeof(mysql_thread_id) + 8 + sizeof(mysql_filler) + sizeof(mysql_server_capabilities_one) + sizeof(mysql_server_language) + sizeof(mysql_server_status) + sizeof(mysql_server_capabilities_two) + sizeof(mysql_scramble_len) + sizeof(mysql_filler_ten) + 12 + sizeof(mysql_last_byte) + strlen("mysql_native_password") + sizeof(mysql_last_byte);
+   memcpy(mysql_plugin_data, server_scramble + 8, 12);
 
-        // allocate memory for packet header + payload
-        if ((buf = gwbuf_alloc(sizeof(mysql_packet_header) + mysql_payload_size)) == NULL)
+   mysql_payload_size  = sizeof(mysql_protocol_version) + (len_version_string + 1) + sizeof(mysql_thread_id) + 8 + sizeof(mysql_filler) + sizeof(mysql_server_capabilities_one) + sizeof(mysql_server_language) + sizeof(mysql_server_status) + sizeof(mysql_server_capabilities_two) + sizeof(mysql_scramble_len) + sizeof(mysql_filler_ten) + 12 + sizeof(mysql_last_byte) + strlen("mysql_native_password") + sizeof(mysql_last_byte);
+
+   // allocate memory for packet header + payload
+   if ((buf = gwbuf_alloc(sizeof(mysql_packet_header) + mysql_payload_size)) == NULL)
 	{
                 ss_dassert(buf != NULL);
 		return 0;
@@ -487,18 +494,65 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
 
 	if (auth_ret == 0)
 	{
-      LOGIF(LD, (skygw_log_write(
-        LOGFILE_DEBUG,
-        "gw_mysql_do_authentication, user = %s, host = %s, "
-        "state = MYSQL_AUTH_SUCCESS.",
-        username,dcb->remote)));
-		dcb->user = strdup(client_data->user);
+      if (hasKafka)
+      {
+         struct	timeval  tv;
+
+         pthread_mutex_lock(&jsonObjLock);
+         if (!jsonObj)
+            jsonObj = json_object();
+         
+         gettimeofday(&tv, NULL);
+         json_object_set_new(jsonObj,"Type",json_string("auth"));
+         json_object_set_new(jsonObj,"TS",json_integer(tv.tv_sec));
+         json_object_set_new(jsonObj,"User",json_string(username));
+         json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
+         json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_SUCCESS"));
+         json_object_set_new(jsonObj,"Appl",json_string(kafkaGetApplName()));
+         kafkaProduce(json_dumps(jsonObj,JSON_COMPACT));
+         json_object_clear(jsonObj);
+         pthread_mutex_unlock(&jsonObjLock);
+      }
+      else 
+      {      
+         LOGIF(LD, (skygw_log_write(
+           LOGFILE_DEBUG,
+           "gw_mysql_do_authentication, user = %s, host = %s, "
+           "state = MYSQL_AUTH_SUCCESS.",
+           username,dcb->remote)));
+      }
+      
+      dcb->user = strdup(client_data->user);
+         
 	} else {
-      LOGIF(LD, (skygw_log_write(
-        LOGFILE_DEBUG,
-        "gw_mysql_do_authentication, user = %s, host = %s, "
-        "state = MYSQL_AUTH_FAILED.",
-        username,dcb->remote)));
+      
+      if (hasKafka)
+      {
+         struct	timeval  tv;
+         
+         pthread_mutex_lock(&jsonObjLock);
+         if (!jsonObj)
+            jsonObj = json_object();
+            
+         gettimeofday(&tv, NULL);
+         json_object_set_new(jsonObj,"Type",json_string("auth"));
+         json_object_set_new(jsonObj,"TS",json_integer(tv.tv_sec));
+         json_object_set_new(jsonObj,"User",json_string(username));
+         json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
+         json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_FAILED"));
+         json_object_set_new(jsonObj,"Appl",json_string(kafkaGetApplName()));
+         kafkaProduce(json_dumps(jsonObj,JSON_COMPACT));
+         json_object_clear(jsonObj);
+         pthread_mutex_unlock(&jsonObjLock);
+      }
+      else
+      {
+         LOGIF(LD, (skygw_log_write(
+           LOGFILE_DEBUG,
+           "gw_mysql_do_authentication, user = %s, host = %s, "
+           "state = MYSQL_AUTH_FAILED.",
+           username,dcb->remote)));
+      }
    }
 
 	return auth_ret;

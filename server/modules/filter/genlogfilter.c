@@ -43,6 +43,7 @@
 #include <sys/time.h>
 #include <regex.h>
 #include <kafka.h>
+#include <jansson.h>
 
 #define USE_RE 0
 
@@ -94,7 +95,7 @@ typedef struct {
 	int   buffer_size;  /* buffer size in MB */
 	size_t  bufpos; /* Used amount in the buffer */
 	char  *buffer;  /* Write buffer */
-   int   queriesLogged;  /* number of queries logged */
+   long   queriesLogged;  /* number of queries logged */
 	struct timeval	lastFlush; /* last flush ops */
    pthread_mutex_t  WriteLock; /* mutex protecting the write buffer and fp*/
 	char	*host_re_def;	   /* host regex */
@@ -124,7 +125,8 @@ typedef struct {
 	char		*clientHost;
 	char		*userName;
 	char		*current;
-   char     *writeBuffer;  /* allocated/deallocated in ClientReply */
+   json_t   *jsonObj;  /* allocated/deallocated in ClientReply */
+   char     *writeBuffer; /* allocated/deallocated in ClientReply */
 } GENLOG_SESSION;
 
 /**
@@ -176,18 +178,21 @@ createInstance(char **options, FILTER_PARAMETER **params)
 	int		i;
 	GENLOG_INSTANCE	*my_instance;
 
+   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+      "[GENLOG] createInstance")));
+
 	if ((my_instance = calloc(1, sizeof(GENLOG_INSTANCE))) != NULL)
 	{      
       my_instance->queriesLogged = 0;
 		my_instance->buffer_size = 1;
 	 	my_instance->bufpos = 0;
-      		gettimeofday(&my_instance->lastFlush, NULL);
+      gettimeofday(&my_instance->lastFlush, NULL);
 		my_instance->filepath = strdup("/tmp/MaxScale_genlog.log");
       my_instance->applname = strdup("MaxScale");
 		my_instance->buffer = NULL;
 		my_instance->host_re_def = NULL;
 		my_instance->user_re_def = NULL;
-      		my_instance->sql_re_def = NULL;
+      my_instance->sql_re_def = NULL;
 		pthread_mutex_init(&my_instance->WriteLock, NULL);
       
 		for (i = 0; params && params[i]; i++)
@@ -204,8 +209,11 @@ createInstance(char **options, FILTER_PARAMETER **params)
 			}
          else if (!strcmp(params[i]->name, "applname"))
 			{
-				free(my_instance->applname);
-				my_instance->applname = strdup(params[i]->value);
+            free(my_instance->applname);
+            if (hasKafka)
+               my_instance->applname = strdup(kafkaGetApplName());
+            else
+            	my_instance->applname = strdup(params[i]->value);
 			}
 			else if (!strcmp(params[i]->name, "host_re"))
 			{
@@ -330,14 +338,17 @@ newSession(FILTER *instance, SESSION *session)
 	GENLOG_SESSION	*my_session;
 	char		*remote, *user;
 
+   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+      "[GENLOG] newSession")));
+      
 	if ((my_session = calloc(1, sizeof(GENLOG_SESSION))) != NULL)
 	{
 		my_session->sessionId = my_instance->sessions;
-      		my_instance->sessions++;
-      		my_session->isLogging = 1;
+      my_instance->sessions++;
+      my_session->isLogging = 1;
 
-      		if ((user = session_getUser(session)) != NULL)
-			my_session->userName = strdup(user);
+      if ((user = session_getUser(session)) != NULL)
+         my_session->userName = strdup(user);
 		else
 			my_session->userName = NULL;
 
@@ -347,28 +358,28 @@ newSession(FILTER *instance, SESSION *session)
 			my_session->clientHost = NULL;
 
 		/* check is the user is excluded */
-      		if (my_instance->user_re_def != NULL)
-			if (regexec(&my_instance->re_user, my_session->userName, 0, NULL, 0) == 0)
+      if (my_instance->user_re_def != NULL)
+         if (regexec(&my_instance->re_user, my_session->userName, 0, NULL, 0) == 0)
 	 			my_session->isLogging =0;
       
-
 		if (USE_RE) {
-	      		if (my_instance->user_re_def != NULL)
+	   	if (my_instance->user_re_def != NULL)
 				if (regexec(&my_instance->re_user, my_session->userName, 1, NULL, 0) == 0)
 		 			my_session->isLogging |= 1 << 4;
-	      			else
+	      	else
 		 			my_session->isLogging &= ~(1 << 4);
 			else
 				my_session->isLogging |= 1 << 4;
 
-	      		if (my_instance->host_re_def != NULL && my_session->isLogging == 4 &&
-				regexec(&my_instance->re_host, my_session->clientHost, 1, NULL, 0) == 0)
-		 		my_session->isLogging |= 1 << 2;
-	      		else
-		 		my_session->isLogging &= ~(1 << 2);
+         if (my_instance->host_re_def != NULL && my_session->isLogging == 4 &&
+            regexec(&my_instance->re_host, my_session->clientHost, 1, NULL, 0) == 0)
+            my_session->isLogging |= 1 << 2;
+         else
+            my_session->isLogging &= ~(1 << 2);
 		}		
 		my_session->current = NULL;
-      
+      my_session->writeBuffer = NULL;
+      my_session->jsonObj = NULL;
 		my_session->active = 1;
 		
 	}
@@ -408,10 +419,11 @@ freeSession(FILTER *instance, void *session)
    if (my_session->current)
       free(my_session->current);
    if (my_session->writeBuffer)
-      free(my_session->writeBuffer);      
+      free(my_session->writeBuffer);
+      
 	free(session);
    
-        return;
+   return;
 }
 
 
@@ -465,6 +477,9 @@ routeQuery(FILTER *instance, void *session, GWBUF *queue)
 	char		*ptr;
 	int		length;
 
+   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+      "[GENLOG] routeQuery")));
+      
 	modutil_extract_SQL(queue, &ptr, &length);
 	if (USE_RE) {
 		if (my_session->active &&  my_session->isLogging >= 6 )
@@ -512,57 +527,73 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 	struct		timeval		tv, diff;
 	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d   Appl:%s\n%s\n";
       
+   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+      "[GENLOG] clientReply")));
+      
 	if (my_session->current && my_session->isLogging == 1)
 	{
 		gettimeofday(&tv, NULL);
 		timersub(&tv, &(my_session->start), &diff);				
 
-      /* approximate size, don't care to overshoot a bit */
-      LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-               "[GENLOG] clientReply: Allocating a writeBuffer of %i\n",
-					strlen(printformat)+
-               strlen(my_session->userName)+strlen(my_session->clientHost)
-               +strlen(my_instance->applname)+strlen(my_session->current)+30)));
-      if ((my_session->writeBuffer = malloc(strlen(printformat)+
-            strlen(my_session->userName)+strlen(my_session->clientHost)
-            +strlen(my_instance->applname)+strlen(my_session->current)+30)) == NULL)
-            /* 30 approx fro num fields */
-      {
-               LOGIF(LE, (skygw_log_write_flush(LOGFILE_ERROR,
-               "genfilter: Couldn't allocate the write buffer"
-               " os size %i\n",
-					strlen(printformat)+
-               strlen(my_session->userName)+strlen(my_session->clientHost)
-               +strlen(my_instance->applname)+strlen(my_session->current)+30)));
-      }
-      else
-      {
-         sprintf(my_session->writeBuffer,printformat,tv.tv_sec, 
-               (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
-               my_session->userName,my_session->clientHost,my_session->sessionId,
-               my_instance->applname,my_session->current);      
-
-         if (hasKafka) {
-            if (kafkaProduce(my_session->writeBuffer,strlen(my_session->writeBuffer)))
-               atomic_add(&my_instance->queriesLogged, 1);
-               /* no need to free writeBuffer, the kafka library is freeing */
+      if (hasKafka) {
+   
+         if (1) {
+            my_session->jsonObj = json_object();
+            
+            json_object_set_new(my_session->jsonObj,"Type",json_string("query"));
+            json_object_set_new(my_session->jsonObj,"Ts",json_integer(tv.tv_sec));
+            json_object_set_new(my_session->jsonObj,"QueryTime",json_real((double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000));
+            json_object_set_new(my_session->jsonObj,"User",json_string(my_session->userName));
+            json_object_set_new(my_session->jsonObj,"Host",json_string(my_session->clientHost));
+            json_object_set_new(my_session->jsonObj,"SessionId",json_integer(my_session->sessionId)); 
+            json_object_set_new(my_session->jsonObj,"Appl",json_string(my_instance->applname));
+            json_object_set_new(my_session->jsonObj,"Sql",json_string(my_session->current));
+            
+            if (kafkaProduce(json_dumps(my_session->jsonObj,JSON_COMPACT)))
+               __sync_fetch_and_add(&my_instance->queriesLogged, 1);
+            
+            json_object_clear(my_session->jsonObj);
+            json_delete(my_session->jsonObj);
          }
          else
          {
-            pthread_mutex_lock(&my_instance->WriteLock);
-            if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
-            
-            /* Every 2s, close/open the log file for easy manipulation/rotation */
-            if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
-               fclose(my_instance->fp);
-               my_instance->fp = fopen(my_instance->filepath,"a");
-               gettimeofday(&my_instance->lastFlush, NULL);
-            }
-            fputs(my_session->writeBuffer,my_instance->fp);
-            pthread_mutex_unlock(&my_instance->WriteLock);
-            atomic_add(&my_instance->queriesLogged, 1);
-            free(my_session->writeBuffer);
+            char *msg;
+            asprintf(&msg,printformat,tv.tv_sec, 
+                  (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
+                  my_session->userName,my_session->clientHost,my_session->sessionId,
+                  my_instance->applname,my_session->current);
+            if (kafkaProduce(msg))
+               __sync_fetch_and_add(&my_instance->queriesLogged, 1);
          }
+      }
+      else
+      {
+         /* approximate size, don't care to overshoot a bit */
+         LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+                  "[GENLOG] clientReply: Allocating a writeBuffer of %i\n",
+                  strlen(printformat)+
+                  strlen(my_session->userName)+strlen(my_session->clientHost)
+                  +strlen(my_instance->applname)+strlen(my_session->current)+30)));
+         
+          asprintf(&my_session->writeBuffer,printformat,tv.tv_sec, 
+                  (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
+                  my_session->userName,my_session->clientHost,my_session->sessionId,
+                  my_instance->applname,my_session->current);      
+
+         pthread_mutex_lock(&my_instance->WriteLock);
+         if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
+         
+         /* Every 2s, close/open the log file for easy manipulation/rotation */
+         if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
+            fclose(my_instance->fp);
+            my_instance->fp = fopen(my_instance->filepath,"a");
+            gettimeofday(&my_instance->lastFlush, NULL);
+         }
+         fputs(my_session->writeBuffer,my_instance->fp);
+         pthread_mutex_unlock(&my_instance->WriteLock);
+         __sync_fetch_and_add(&my_instance->queriesLogged, 1);
+         free(my_session->writeBuffer);
+         
       }
 	}
 
@@ -615,7 +646,7 @@ diagnostic(FILTER *instance, void *fsession, DCB *dcb)
       dcb_printf(dcb, "\t\tLast buffer flush		%s\n",
          asctime(localtime(&my_instance->lastFlush.tv_sec)));
    }
-   dcb_printf(dcb, "\t\tNumber of queries logged:	%i\n",
+   dcb_printf(dcb, "\t\tNumber of queries logged:	%li\n",
       my_instance->queriesLogged);
    
 }

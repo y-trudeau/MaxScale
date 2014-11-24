@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <gwbitmask.h>
+#include <unistd.h>
 
 /**
  * @file gwbitmask.c  Implementation of bitmask opertions for the gateway
@@ -198,8 +199,21 @@ unsigned char	*ptr, *eptr;
 void
 bitmask_copy(GWBITMASK *dest, GWBITMASK *src)
 {
-	spinlock_acquire(&src->lock);
-	spinlock_acquire(&dest->lock);
+
+   /* these 2 spinlocks can deadlock so we need to be careful, forcing
+    * the same order of aquisition in all threads */
+   if (&src->lock > &dest->lock)
+   {
+      spinlock_acquire(&src->lock);
+      spinlock_acquire(&dest->lock);
+   }
+   else
+   {   
+      spinlock_acquire(&dest->lock);
+      spinlock_acquire(&src->lock);
+   }
+   
+   
 	if (dest->length)
 		free(dest->bits);
 	if ((dest->bits = malloc(src->length / 8)) == NULL)

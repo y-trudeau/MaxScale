@@ -52,6 +52,7 @@ rd_kafka_topic_conf_t *topic_conf;
 rd_kafka_t *rk = NULL;
 char  *brokers = NULL;
 char  *topicName = NULL;
+char  *applName = NULL;
 int   partition = -1;
 int   hasKafka = 0;
 
@@ -247,6 +248,11 @@ kafkaOptions()
          if (topicName) free(topicName);
          topicName = strdup(val);
       } 
+      else if (!strcmp(name, "applName"))
+      {
+         if (applName) free(applName);
+         applName = strdup(val);
+      }
       else if (!strncmp(name, "topic.", strlen("topic.")))
       {
 			res = rd_kafka_topic_conf_set(topic_conf,
@@ -297,7 +303,7 @@ static void kafkaMsgDelivered (rd_kafka_t *rk,
       LOGIF(LT, (skygw_log_write_flush(
          LOGFILE_TRACE,
          "TRACE : Kafka message delivered "
-         "(%zd bytes)\n", len)));
+         "(%zd bytes)", len)));
    }
 }
 
@@ -316,14 +322,14 @@ static void kafkaLogger (const rd_kafka_t *rk, int level,
  * Kafka produce message
  * Queue a message for the brokers
  */
-int kafkaProduce(char *buf, size_t len)
+int kafkaProduce(char *buf)
 {
    int errno;
    /* Produce message. */
    if ((errno = rd_kafka_produce(rkt, partition,
               RD_KAFKA_MSG_F_FREE,
               /* Payload and length */
-              buf, len,
+              buf, strlen(buf),
               /* Optional key and its length */
               NULL, 0,
               /* Message opaque, provided in
@@ -345,4 +351,13 @@ int kafkaProduce(char *buf, size_t len)
    /* Poll to handle delivery reports */
    rd_kafka_poll(rk, 0);
    return 1;
+}
+
+/**
+ * Return the ApplName used for kafka, convinience function
+ * 
+ */
+char * kafkaGetApplName()
+{
+   return applName;
 }
