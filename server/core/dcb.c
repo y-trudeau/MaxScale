@@ -129,7 +129,7 @@ DCB	*rval;
         rval->dcb_write_active = false;
         rval->dcb_read_active = false;
 #endif
-        spinlock_init(&rval->dcb_initlock);
+   spinlock_init(&rval->dcb_initlock);
 	spinlock_init(&rval->writeqlock);
 	spinlock_init(&rval->delayqlock);
 	spinlock_init(&rval->authlock);
@@ -1155,63 +1155,67 @@ int	above_water;
 void
 dcb_close(DCB *dcb)
 {
-        int  rc;
+   int  rc;
 
-        CHK_DCB(dcb);
+   CHK_DCB(dcb);
 
-        /*<
-         * dcb_close may be called for freshly created dcb, in which case
-         * it only needs to be freed.
-         */
-        if (dcb->state == DCB_STATE_ALLOC) 
-        {
-                dcb_set_state(dcb, DCB_STATE_DISCONNECTED, NULL);
-                dcb_final_free(dcb);
-                return;
-        }
-        
-        ss_dassert(dcb->state == DCB_STATE_POLLING ||
-               dcb->state == DCB_STATE_NOPOLLING ||
-               dcb->state == DCB_STATE_ZOMBIE);
-        
-        /*<
-        * Stop dcb's listening and modify state accordingly.
-        */
-        rc = poll_remove_dcb(dcb);
-        
-        ss_dassert(dcb->state == DCB_STATE_NOPOLLING ||
-                dcb->state == DCB_STATE_ZOMBIE);
-        /**
-         * close protocol and router session
-         */
-        if (dcb->func.close != NULL)
-        {
-                dcb->func.close(dcb);
-        }
-	dcb_call_callback(dcb, DCB_REASON_CLOSE);
+   spinlock_acquire(&dcb->dcb_initlock);
 
-        if (rc == 0) {
-                LOGIF(LD, (skygw_log_write(
-                        LOGFILE_DEBUG,
-                        "%lu [dcb_close] Removed dcb %p in state %s from "
-                        "poll set.",
-                        pthread_self(),
-                        dcb,
-                        STRDCBSTATE(dcb->state))));
-        } else {
-            LOGIF(LE, (skygw_log_write(
-                    LOGFILE_ERROR,
-                    "%lu [dcb_close] Error : Removing dcb %p in state %s from "
-                    "poll set failed.",
-                    pthread_self(),
-                    dcb,
-                    STRDCBSTATE(dcb->state))));
-        }
-        
-        if (dcb->state == DCB_STATE_NOPOLLING) 
-        {
-                dcb_add_to_zombieslist(dcb);
-        }
+   /*<
+   * dcb_close may be called for freshly created dcb, in which case
+   * it only needs to be freed.
+   */
+   if (dcb->state == DCB_STATE_ALLOC) 
+   {
+          dcb_set_state(dcb, DCB_STATE_DISCONNECTED, NULL);
+          dcb_final_free(dcb);
+          return;
+   }
+
+   ss_dassert(dcb->state == DCB_STATE_POLLING ||
+         dcb->state == DCB_STATE_NOPOLLING ||
+         dcb->state == DCB_STATE_ZOMBIE);
+
+   /*<
+   * Stop dcb's listening and modify state accordingly.
+   */
+   rc = poll_remove_dcb(dcb);
+
+   ss_dassert(dcb->state == DCB_STATE_NOPOLLING ||
+          dcb->state == DCB_STATE_ZOMBIE);
+   /**
+   * close protocol and router session
+   */
+   if (dcb->func.close != NULL)
+   {
+          dcb->func.close(dcb);
+   }
+   dcb_call_callback(dcb, DCB_REASON_CLOSE);
+
+   if (rc == 0) {
+          LOGIF(LD, (skygw_log_write(
+                  LOGFILE_DEBUG,
+                  "%lu [dcb_close] Removed dcb %p in state %s from "
+                  "poll set.",
+                  pthread_self(),
+                  dcb,
+                  STRDCBSTATE(dcb->state))));
+   } else {
+      LOGIF(LE, (skygw_log_write(
+              LOGFILE_ERROR,
+              "%lu [dcb_close] Error : Removing dcb %p in state %s from "
+              "poll set failed.",
+              pthread_self(),
+              dcb,
+              STRDCBSTATE(dcb->state))));
+   }
+
+   if (dcb->state == DCB_STATE_NOPOLLING) 
+   {
+          dcb_add_to_zombieslist(dcb);
+   }
+   
+   spinlock_release(&dcb->dcb_initlock);
 }
 
 /**
@@ -1553,23 +1557,34 @@ void dcb_hashtable_stats(
 
 
 bool dcb_set_state(
-        DCB*              dcb,
-        const dcb_state_t new_state,
-        dcb_state_t*      old_state)
+   DCB*              dcb,
+   const dcb_state_t new_state,
+   dcb_state_t*      old_state)
 {
-        bool              succp;
-        dcb_state_t       state ;
-        
-        CHK_DCB(dcb);
-        spinlock_acquire(&dcb->dcb_initlock);
-        succp = dcb_set_state_nomutex(dcb, new_state, &state);
-        
-        spinlock_release(&dcb->dcb_initlock);
+   bool              succp;
+   dcb_state_t       state ;
 
-        if (old_state != NULL) {
-                *old_state = state;
-        }
-        return succp;
+   CHK_DCB(dcb);
+
+   /* 
+    * check if the thread already own the lock, could be from dcb_close for 
+    * example
+    */
+   if (spinlock_owner(&dcb->dcb_initlock) == THREAD_SHELF())
+   {
+      succp = dcb_set_state_nomutex(dcb, new_state, &state);
+   }
+   else
+   {
+      spinlock_acquire(&dcb->dcb_initlock);
+      succp = dcb_set_state_nomutex(dcb, new_state, &state);
+      spinlock_release(&dcb->dcb_initlock);
+   }
+
+   if (old_state != NULL) {
+          *old_state = state;
+   }
+   return succp;
 }
 
 static bool dcb_set_state_nomutex(

@@ -866,7 +866,7 @@ static void* newSession(
 	/**
          * Add this session to end of the list of active sessions in router.
          */
-	spinlock_acquire(&router->lock);
+      spinlock_acquire(&router->lock);
         client_rses->next   = router->connections;
         router->connections = client_rses;
         spinlock_release(&router->lock);
@@ -2442,109 +2442,126 @@ static void bref_set_state(
  *      because only those in correct state are connected to.
  */
 static bool select_connect_backend_servers(
-        backend_ref_t**    p_master_ref,
-        backend_ref_t*     backend_ref,
-        int                router_nservers,
-        int                max_nslaves,
-        int                max_slave_rlag,
-        select_criteria_t  select_criteria,
-        SESSION*           session,
-        ROUTER_INSTANCE*   router)
+   backend_ref_t**    p_master_ref,
+   backend_ref_t*     backend_ref,
+   int                router_nservers,
+   int                max_nslaves,
+   int                max_slave_rlag,
+   select_criteria_t  select_criteria,
+   SESSION*           session,
+   ROUTER_INSTANCE*   router)
 {
-        bool            succp = true;
-        bool            master_found;
-        bool            master_connected;
-        int             slaves_found = 0;
-        int             slaves_connected = 0;
-        int             i;
-        const int       min_nslaves = 0; /*< not configurable at the time */
-        bool            is_synced_master;
-        int (*p)(const void *, const void *);
-	BACKEND*       master_host = NULL;
+   bool            succp = true;
+   bool            master_found;
+   bool            master_connected;
+   int             slaves_found = 0;
+   int             slaves_connected = 0;
+   int             i;
+   const int       min_nslaves = 0; /*< not configurable at the time */
+   bool            is_synced_master;
+   int (*p)(const void *, const void *);
+   BACKEND*       master_host = NULL;
         
-        if (p_master_ref == NULL || backend_ref == NULL)
-        {
-                ss_dassert(FALSE);
-                succp = false;
-                goto return_succp;
-        }
+   if (p_master_ref == NULL || backend_ref == NULL)
+   {
+      ss_dassert(FALSE);
+      succp = false;
+      goto return_succp;
+   }
       
 	/* get the root Master */ 
 	master_host = get_root_master(backend_ref, router_nservers); 
 
-        /** Master is already chosen and connected. This is slave failure case */
-        if (*p_master_ref != NULL &&
-                BREF_IS_IN_USE((*p_master_ref)))
-        {
-                LOGIF(LD, (skygw_log_write(
-                        LOGFILE_DEBUG,
-                        "%lu [select_connect_backend_servers] Master %p fd %d found.",
-                        pthread_self(),
-                        (*p_master_ref)->bref_dcb,
-                        (*p_master_ref)->bref_dcb->fd)));
-                
-                master_found     = true;
-                master_connected = true;
-		/* assert with master_host */
-                ss_dassert(master_host && 
-			((*p_master_ref)->bref_backend->backend_server == 
-				master_host->backend_server) && 
-			SERVER_MASTER);
-        }
-        /** New session or master failure case */
-        else
-        {
-                LOGIF(LD, (skygw_log_write(
-                        LOGFILE_DEBUG,
-                        "%lu [select_connect_backend_servers] Session %p doesn't "
-                        "currently have a master chosen. Proceeding to master "
-                        "selection.",
-                        pthread_self(),
-                        session)));
-                
-                master_found     = false;
-                master_connected = false;
-        }
-        /** Check slave selection criteria and set compare function */
-        p = criteria_cmpfun[select_criteria];
-        
-        if (p == NULL)
-        {
-                succp = false;
-                goto return_succp;
-        }        
-        
-        if (router->bitvalue != 0) /*< 'synced' is the only bitvalue in rwsplit */
-        {
-                is_synced_master = true;
-        }
-        else
-        {
-                is_synced_master = false;
-        }
+   /** Master is already chosen and connected. This is slave failure case */
+   if (*p_master_ref != NULL &&
+       BREF_IS_IN_USE((*p_master_ref)))
+   {
+      LOGIF(LD, (skygw_log_write(
+            LOGFILE_DEBUG,
+            "%lu [select_connect_backend_servers] Master %p fd %d found.",
+            pthread_self(),
+            (*p_master_ref)->bref_dcb,
+            (*p_master_ref)->bref_dcb->fd)));
+
+      master_found     = true;
+      master_connected = true;
+
+      if ( ! master_host )
+         LOGIF(LE, (skygw_log_write(
+                  LOGFILE_ERROR,
+                  "In select_connect_backend_servers, master_host found to be null."
+                  )));
+
+      if ( ! ((*p_master_ref)->bref_backend->backend_server == 
+         master_host->backend_server)) 
+         LOGIF(LE, (skygw_log_write(
+                  LOGFILE_ERROR,
+                  "In select_connect_backend_servers, p_master_ref->bref_backend->backend_server doesn't equal "
+                  "to master_host->backend_server (%s != %s)",
+                  (*p_master_ref)->bref_backend->backend_server->name,
+                  master_host->backend_server->name)));   
+                        
+      /* is master info sane? */
+      if (master_host && 
+         ((*p_master_ref)->bref_backend->backend_server == 
+         master_host->backend_server) && 
+         SERVER_MASTER)
+            return false;  /* false will force close the dcb */
+   }
+   /** New session or master failure case */
+   else
+   {
+         LOGIF(LD, (skygw_log_write(
+               LOGFILE_DEBUG,
+               "%lu [select_connect_backend_servers] Session %p doesn't "
+               "currently have a master chosen. Proceeding to master "
+               "selection.",
+               pthread_self(),
+               session)));
+
+         master_found     = false;
+         master_connected = false;
+   }
+   /** Check slave selection criteria and set compare function */
+   p = criteria_cmpfun[select_criteria];
+
+   if (p == NULL)
+   {
+          succp = false;
+          goto return_succp;
+   }        
+
+   if (router->bitvalue != 0) /*< 'synced' is the only bitvalue in rwsplit */
+   {
+          is_synced_master = true;
+   }
+   else
+   {
+          is_synced_master = false;
+   }
 
 #if defined(EXTRA_SS_DEBUG)        
         LOGIF(LT, (skygw_log_write(LOGFILE_TRACE, "Servers and conns before ordering:")));
         
-        for (i=0; i<router_nservers; i++)
-        {
-                BACKEND* b = backend_ref[i].bref_backend;
+   for (i=0; i<router_nservers; i++)
+   {
+          BACKEND* b = backend_ref[i].bref_backend;
 
-                LOGIF(LT, (skygw_log_write(LOGFILE_TRACE, 
-                                           "master bref %p bref %p %d %s %d:%d",
-                                           *p_master_ref,
-                                           &backend_ref[i],
-                                           backend_ref[i].bref_state,
-                                           b->backend_server->name,
-                                           b->backend_server->port,
-                                           b->backend_conn_count)));                
-        }
+          LOGIF(LT, (skygw_log_write(LOGFILE_TRACE, 
+                                     "master bref %p bref %p %d %s %d:%d",
+                                     *p_master_ref,
+                                     &backend_ref[i],
+                                     backend_ref[i].bref_state,
+                                     b->backend_server->name,
+                                     b->backend_server->port,
+                                     b->backend_conn_count)));                
+   }
 #endif
 	/* assert with master_host */
-        ss_dassert(!master_connected ||
-                (master_host && 
-                ((*p_master_ref)->bref_backend->backend_server == master_host->backend_server) && 
-                SERVER_MASTER));
+   ss_dassert(!master_connected ||
+          (master_host && 
+          ((*p_master_ref)->bref_backend->backend_server == master_host->backend_server) && 
+          SERVER_MASTER));
         /**
          * Sort the pointer list to servers according to connection counts. As 
          * a consequence those backends having least connections are in the 
@@ -3971,7 +3988,10 @@ static bool handle_error_new_connection(
         else 
         {
                 while ((errmsg=gwbuf_consume(errmsg, GWBUF_LENGTH(errmsg))) != NULL)
-                        ;
+                        LOGIF(LE, (skygw_log_write_flush(
+                                LOGFILE_ERROR,
+                                "handle_error_new_connection, errmsg = %s",
+                                (char *) errmsg->start)));
         }
         bref_clear_state(bref, BREF_IN_USE);
         bref_set_state(bref, BREF_CLOSED);
@@ -4339,30 +4359,33 @@ static BACKEND *get_root_master(
 	backend_ref_t *servers, 
 	int            router_nservers) 
 {
-        int i = 0;
-        BACKEND * master_host = NULL;
+   int i = 0;
+   BACKEND * master_host = NULL;
 
-        for (i = 0; i< router_nservers; i++) 
+   for (i = 0; i< router_nservers; i++) 
 	{
-		BACKEND* b;
-		
-		if (servers[i].bref_backend == NULL)
-		{
-			continue;
-		}
-		
-		b = servers[i].bref_backend;
+      BACKEND* b;
 
-		if ((b->backend_server->status & 
-			(SERVER_MASTER|SERVER_MAINT)) == SERVER_MASTER) 
-		{
-			if (master_host == NULL || 
-				(b->backend_server->depth < master_host->backend_server->depth))
-			{
-				master_host = b;
-                        }
-                }
-        }
+      if (servers[i].bref_backend == NULL)
+      {
+         continue;
+      }
+
+      b = servers[i].bref_backend;
+
+      spinlock_acquire(&b->backend_server->lock);
+
+      if ((b->backend_server->status & 
+         (SERVER_MASTER|SERVER_MAINT)) == SERVER_MASTER) 
+      {
+         if (master_host == NULL || 
+            (b->backend_server->depth < master_host->backend_server->depth))
+         {
+            master_host = b;
+         }
+      }
+      spinlock_release(&b->backend_server->lock);
+   }
 	return master_host;
 }
 
@@ -4390,6 +4413,8 @@ static backend_ref_t* get_root_master_bref(
 	
 	while (i<rses->rses_nbackends)
 	{
+      spinlock_acquire(&bref->bref_backend->backend_server->lock);
+      
 		if ((bref->bref_backend->backend_server->status &
 			(SERVER_MASTER|SERVER_MAINT)) == SERVER_MASTER)
 		{
@@ -4403,6 +4428,7 @@ static backend_ref_t* get_root_master_bref(
 				}
 			}
 		}
+      spinlock_release(&bref->bref_backend->backend_server->lock);
 		bref++;
 		i += 1;
 	}

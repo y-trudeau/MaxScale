@@ -193,7 +193,9 @@ kafkaShutdown()
 	rd_kafka_wait_destroyed(2000);
 }
 /**
- * Parse the kafka_options
+ * Parse the kafka_options.  See here for available options:
+ * https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
+ * 
  * 
  */
 void

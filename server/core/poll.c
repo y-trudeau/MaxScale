@@ -56,7 +56,8 @@ extern int lm_enabled_logfiles_bitmask;
  * cause the epoll_wait calls to be moved under a mutex. This may be useful
  * for debuggign purposes but should be avoided in general use.
  */
-#define	MUTEX_EPOLL	0
+#define	MUTEX_EPOLL	1
+#define  MUTEX_BLOCK 1
 
 static	int		epoll_fd = -1;	  /*< The epoll file descriptor */
 static	int		do_shutdown = 0;  /*< Flag the shutdown of the poll subsystem */

@@ -1072,6 +1072,7 @@ static MONITOR_SERVERS *get_replication_tree(MYSQL_MONITOR *handle, int num_serv
 
 	while (ptr)
 	{
+
 		/* The server could be in SERVER_IN_MAINT
 		 * that means SERVER_IS_RUNNING returns 0
 		 * Let's check only for SERVER_IS_DOWN: server is not running
@@ -1082,6 +1083,7 @@ static MONITOR_SERVERS *get_replication_tree(MYSQL_MONITOR *handle, int num_serv
 		}
 		depth = 0;
 		current = ptr->server;
+      spinlock_acquire(&current->lock);
 
 		node_id = current->master_id;
 		if (node_id < 1) {
@@ -1140,7 +1142,7 @@ static MONITOR_SERVERS *get_replication_tree(MYSQL_MONITOR *handle, int num_serv
 			}
 
 		}
-
+      spinlock_release(&current->lock);
 		ptr = ptr->next;
 	}
 

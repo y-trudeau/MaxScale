@@ -33,8 +33,9 @@
   * @verbatim
  * Revision History
  *
- * Date		Who		Description
- * 28/06/13	Mark Riddoch	Initial implementation
+ * Date		   Who		      Description
+ * 28/06/13	   Mark Riddoch	Initial implementation
+ * 24/11/2014  Yves Trudeau   Fixed locking issues
  *
  * @endverbatim
  */
@@ -117,7 +118,8 @@ bitmask_clear(GWBITMASK *bitmask, int bit)
 {
 unsigned	char *ptr;
 unsigned	char mask;
-
+   
+   spinlock_acquire(&bitmask->lock);
 	if (bit >= bitmask->length)
 	{
 		bitmask->bits = realloc(bitmask->bits,
@@ -129,6 +131,7 @@ unsigned	char mask;
 	ptr = bitmask->bits + (bit / 8);
 	mask = 1 << (bit % 8);
 	*ptr &= ~mask;
+   spinlock_release(&bitmask->lock);
 }
 
 /**

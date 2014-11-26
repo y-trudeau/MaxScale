@@ -346,6 +346,7 @@ newSession(FILTER *instance, SESSION *session)
 		my_session->sessionId = my_instance->sessions;
       my_instance->sessions++;
       my_session->isLogging = 1;
+      my_session->jsonObj = NULL;
 
       if ((user = session_getUser(session)) != NULL)
          my_session->userName = strdup(user);
@@ -420,6 +421,8 @@ freeSession(FILTER *instance, void *session)
       free(my_session->current);
    if (my_session->writeBuffer)
       free(my_session->writeBuffer);
+   if (my_session->jsonObj)
+      json_delete(my_session->jsonObj);
       
 	free(session);
    
@@ -538,7 +541,9 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
       if (hasKafka) {
    
          if (1) {
-            my_session->jsonObj = json_object();
+            
+            if (! my_session->jsonObj)
+               my_session->jsonObj = json_object();
             
             json_object_set_new(my_session->jsonObj,"Type",json_string("query"));
             json_object_set_new(my_session->jsonObj,"Ts",json_integer(tv.tv_sec));
@@ -553,7 +558,6 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
                __sync_fetch_and_add(&my_instance->queriesLogged, 1);
             
             json_object_clear(my_session->jsonObj);
-            json_delete(my_session->jsonObj);
          }
          else
          {

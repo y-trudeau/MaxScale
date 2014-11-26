@@ -31,7 +31,7 @@
 #define THREAD		pthread_t
 #define THREAD_SHELF	pthread_self
 
-extern void 	*thread_start(void (*entry)(void *), void *arg);
+extern void *thread_start(void (*entry)(void *), void *arg);
 extern void	thread_wait(void *thd);
 extern void	thread_millisleep(int ms);
 

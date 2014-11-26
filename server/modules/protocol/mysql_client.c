@@ -594,7 +594,7 @@ int gw_read_client_event(
         
         if (rc < 0)
         {
-                dcb_close(dcb);
+             dcb_close(dcb);
         }
         nbytes_read = gwbuf_length(read_buffer);
        
@@ -657,7 +657,7 @@ int gw_read_client_event(
 	switch (protocol->protocol_auth_state) {
                 
         case MYSQL_AUTH_SENT:
-        {
+        {             
                 int    auth_val = -1;
                                 
                 auth_val = gw_mysql_do_authentication(dcb, read_buffer);
@@ -1426,22 +1426,32 @@ gw_client_close(DCB *dcb)
         if (session != NULL) 
         {
                 CHK_SESSION(session);
-                spinlock_acquire(&session->ses_lock);
                 
-                if (session->state == SESSION_STATE_STOPPING)
-                {
-                        /** 
-                         * Session is already getting closed so avoid 
-                         * redundant calls 
-                         */
-                        spinlock_release(&session->ses_lock);
-                        return 1;
-                }
-                else
-                {
-                        session->state = SESSION_STATE_STOPPING;
-                        spinlock_release(&session->ses_lock);
-                }
+               if (0) 
+               {
+                   spinlock_acquire(&session->ses_lock);
+                   
+                   if (session->state == SESSION_STATE_STOPPING)
+                   {
+                           /** 
+                            * Session is already getting closed so avoid 
+                            * redundant calls 
+                            */
+                           spinlock_release(&session->ses_lock);
+                           return 1;
+                   }
+                   else
+                   {
+                           session->state = SESSION_STATE_STOPPING;
+                           spinlock_release(&session->ses_lock);
+                   }
+               }
+               else
+               {
+                  spinlock_acquire(&session->ses_lock);
+                  session->state = SESSION_STATE_STOPPING;
+                  spinlock_release(&session->ses_lock);
+               }                   
                 router = session->service->router;
                 router_instance = session->service->router_instance;
                 rsession = session->router_session;

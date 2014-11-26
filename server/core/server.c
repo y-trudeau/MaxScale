@@ -83,6 +83,7 @@ SERVER 	*server;
 	server->master_id = -1;
 	server->depth = -1;
 	server->slaves = NULL;
+   spinlock_init(&server->lock);
 
 	spinlock_acquire(&server_spin);
 	server->next = allServers;

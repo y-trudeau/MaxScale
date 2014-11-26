@@ -45,6 +45,7 @@
  */
 typedef struct spinlock {
 	int		lock;		/*< Is the lock held? */
+   THREAD		owner;		/*< owner of this lock */
 #if SPINLOCK_PROFILE
 	int		spins;		/*< Number of spins on this lock */
 	int		maxspins;	/*< Max no of spins to acquire lock */
@@ -52,7 +53,6 @@ typedef struct spinlock {
 	int		waiting;	/*< No. of threads acquiring this lock */
 	int		max_waiting;	/*< Max no of threads waiting for lock */
 	int		contended;	/*< No. of times acquire was contended */
-	THREAD		owner;		/*< Last owner of this lock */
 #endif
 } SPINLOCK;
 
@@ -77,4 +77,5 @@ extern int	spinlock_acquire_nowait(SPINLOCK *lock);
 extern void	spinlock_release(SPINLOCK *lock);
 extern void	spinlock_stats(SPINLOCK *lock, 
 			void (*reporter)(void *, char *, int), void *hdl);
+extern THREAD spinlock_owner(SPINLOCK *lock);
 #endif

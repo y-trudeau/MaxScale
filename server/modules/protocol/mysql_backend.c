@@ -1011,7 +1011,9 @@ gw_backend_hangup(DCB *dcb)
 #if defined(SS_DEBUG)                
                 LOGIF(LE, (skygw_log_write_flush(
                         LOGFILE_ERROR,
-                        "Backend hangup -> closing session.")));
+                        "Backend hangup -> closing session, dcb state = %s "
+                        "session %p",
+                        STRDCBSTATE(dcb->state),session)));
 #endif
                 
                 spinlock_acquire(&session->ses_lock);

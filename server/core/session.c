@@ -391,7 +391,7 @@ void
 printSession(SESSION *session)
 {
 	printf("Session %p\n", session);
-	printf("\tState:    	%s\n", session_state(session->state));
+	printf("\tState:    	%s %i\n", session_state(session->state),session->state);
 	printf("\tService:	%s (%p)\n", session->service->name, session->service);
 	printf("\tClient DCB:	%p\n", session->client);
 	printf("\tConnected:	%s", asctime(localtime(&session->stats.connect)));
@@ -498,7 +498,7 @@ SESSION	*ptr;
 	while (ptr)
 	{
 		dcb_printf(dcb, "Session %p\n", ptr);
-		dcb_printf(dcb, "\tState:    		%s\n", session_state(ptr->state));
+		dcb_printf(dcb, "\tState:    		%s %i\n", session_state(ptr->state),ptr->state);
 		dcb_printf(dcb, "\tService:		%s (%p)\n", ptr->service->name, ptr->service);
 		dcb_printf(dcb, "\tClient DCB:		%p\n", ptr->client);
 		if (ptr->client && ptr->client->remote)
@@ -598,6 +598,8 @@ session_state(int state)
 		return "Session Ready";
 	case SESSION_STATE_ROUTER_READY:
 		return "Session ready for routing";
+   case SESSION_STATE_STOPPING:
+      return "Session is stopping";
 	case SESSION_STATE_LISTENER:
 		return "Listener Session";
 	case SESSION_STATE_LISTENER_STOPPED:

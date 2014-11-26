@@ -18,6 +18,7 @@
  * Copyright SkySQL Ab 2013
  */
 #include <dcb.h>
+#include	<spinlock.h>
 
 /**
  * @file service.h
@@ -72,6 +73,7 @@ typedef struct {
  * between the gateway and the server.
  */
 typedef struct server {
+   SPINLOCK  lock;			/**< The server struct spinlock */
 	char		*unique_name;	/**< Unique name for the server */
 	char		*name;		/**< Server name/IP address*/
 	unsigned short	port;		/**< Port to listen on */

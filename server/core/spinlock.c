@@ -40,6 +40,7 @@ void
 spinlock_init(SPINLOCK *lock)
 {
 	lock->lock = 0;
+   lock->owner = NULL;
 #if SPINLOCK_PROFILE
 	lock->spins = 0;
 	lock->acquired = 0;
@@ -48,6 +49,18 @@ spinlock_init(SPINLOCK *lock)
 	lock->contended = 0;
 #endif
 }
+
+/**
+ * Return the current owner of the lock
+ *
+ * @param lock The spinlock
+ */
+THREAD
+spinlock_owner(SPINLOCK *lock)
+{
+   return lock->owner;
+}
+
 
 /**
  * Acquire a spinlock.
@@ -62,6 +75,11 @@ int	spins = 0;
 
 	atomic_add(&(lock->waiting), 1);
 #endif
+
+   /* Is the thread the current owner */
+   if (lock->owner == THREAD_SHELF())
+      return;
+      
 	while (atomic_add(&(lock->lock), 1) != 0)
 	{
 		atomic_add(&(lock->lock), -1);
@@ -70,6 +88,7 @@ int	spins = 0;
 		spins++;
 #endif
 	}
+   
 #if SPINLOCK_PROFILE
 	if (spins)
 	{
@@ -78,9 +97,10 @@ int	spins = 0;
 			lock->maxspins = spins;
 	}
 	lock->acquired++;
-	lock->owner = THREAD_SHELF();
 	atomic_add(&(lock->waiting), -1);
 #endif
+   
+   lock->owner = THREAD_SHELF();
 }
 
 /**
@@ -99,8 +119,8 @@ spinlock_acquire_nowait(SPINLOCK *lock)
 	}
 #if SPINLOCK_PROFILE
 	lock->acquired++;
-	lock->owner = THREAD_SHELF();
 #endif
+   lock->owner = THREAD_SHELF();
 	return TRUE;
 }
 
@@ -116,6 +136,7 @@ spinlock_release(SPINLOCK *lock)
 	if (lock->waiting > lock->max_waiting)
 		lock->max_waiting = lock->waiting;
 #endif
+   lock->owner = NULL;
 	atomic_add(&(lock->lock), -1);
 }
 

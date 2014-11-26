@@ -109,16 +109,16 @@ SHARED_BUF	*sbuf;
 void
 gwbuf_free(GWBUF *buf)
 {
-BUF_PROPERTY	*prop;
+   BUF_PROPERTY	*prop;
 
-        buffer_object_t* bo;
+   buffer_object_t* bo;
         
 	CHK_GWBUF(buf);
 	if (atomic_add(&buf->sbuf->refcount, -1) == 1)
 	{
                 free(buf->sbuf->data);
                 free(buf->sbuf);
-		bo = buf->gwbuf_bufobj;
+                bo = buf->gwbuf_bufobj;
 
                 while (bo != NULL)
                 {
