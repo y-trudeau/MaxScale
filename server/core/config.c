@@ -1140,7 +1140,7 @@ handle_global_item(const char *name, const char *value)
 {
 int i;
 	if (strcmp(name, "threads") == 0) {
-		gateway.n_threads = atoi(value);
+		gateway.n_threads = 1; /* atoi(value); forces single thread */
    } else if (!strcmp(name, "kafka_options")) {
       gateway.kafka_options = strdup(value);
    } else {

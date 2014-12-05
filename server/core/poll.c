@@ -56,8 +56,8 @@ extern int lm_enabled_logfiles_bitmask;
  * cause the epoll_wait calls to be moved under a mutex. This may be useful
  * for debuggign purposes but should be avoided in general use.
  */
-#define	MUTEX_EPOLL	1
-#define  MUTEX_BLOCK 1
+#define	MUTEX_EPOLL	0
+#define  MUTEX_BLOCK 0
 
 static	int		epoll_fd = -1;	  /*< The epoll file descriptor */
 static	int		do_shutdown = 0;  /*< Flag the shutdown of the poll subsystem */
@@ -655,15 +655,17 @@ DCB                *zombies = NULL;
                                                 eno,
                                                 strerror(eno))));
                                         atomic_add(&pollStats.n_hup, 1);
+                                        
 					spinlock_acquire(&dcb->dcb_initlock);
 					if ((dcb->flags & DCBF_HUNG) == 0)
 					{
 						dcb->flags |= DCBF_HUNG;
-						spinlock_release(&dcb->dcb_initlock);
+                  spinlock_release(&dcb->dcb_initlock);
 						dcb->func.hangup(dcb);
 					}
-					else
-						spinlock_release(&dcb->dcb_initlock);
+               else
+                  spinlock_release(&dcb->dcb_initlock);
+						
 				}
 #endif
 			} /*< for */

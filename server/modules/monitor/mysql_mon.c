@@ -1093,7 +1093,7 @@ static MONITOR_SERVERS *get_replication_tree(MYSQL_MONITOR *handle, int num_serv
 			if (find_slave == NULL) {
 				current->depth = -1;
 				ptr = ptr->next;
-
+            spinlock_release(&current->lock);
 				continue;
 			} else {
 				current->depth = 0;

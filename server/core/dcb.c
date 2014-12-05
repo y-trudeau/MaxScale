@@ -552,7 +552,7 @@ bool    succp = false;
 #endif
                 succp = dcb_set_state(dcb, DCB_STATE_DISCONNECTED, NULL);
                 ss_dassert(succp);
-		dcb_next = dcb->memdata.next;
+                dcb_next = dcb->memdata.next;
                 dcb_final_free(dcb);
                 dcb = dcb_next;
         }
@@ -1159,8 +1159,6 @@ dcb_close(DCB *dcb)
 
    CHK_DCB(dcb);
 
-   spinlock_acquire(&dcb->dcb_initlock);
-
    /*<
    * dcb_close may be called for freshly created dcb, in which case
    * it only needs to be freed.
@@ -1209,13 +1207,13 @@ dcb_close(DCB *dcb)
               dcb,
               STRDCBSTATE(dcb->state))));
    }
-
+   
    if (dcb->state == DCB_STATE_NOPOLLING) 
    {
           dcb_add_to_zombieslist(dcb);
    }
    
-   spinlock_release(&dcb->dcb_initlock);
+   
 }
 
 /**

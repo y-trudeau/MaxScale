@@ -961,7 +961,7 @@ int main(int argc, char **argv)
    char*    cnf_file_arg = NULL;         /*< conf filename from cmd-line arg */
    void*    log_flush_thr = NULL;
 	int      option_index;
-	int      logtofile = 0;	      	      /* Use shared memory or file */
+	int      logtofile = 1;	      	      /* Use shared memory or file */
    ssize_t  log_flush_timeout_ms = 0;
    sigset_t sigset;
    sigset_t sigpipe_mask;
