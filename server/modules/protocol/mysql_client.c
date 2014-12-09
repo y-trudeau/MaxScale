@@ -504,7 +504,7 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
          
          gettimeofday(&tv, NULL);
          json_object_set_new(jsonObj,"Type",json_string("auth"));
-         json_object_set_new(jsonObj,"TS",json_integer(tv.tv_sec));
+         json_object_set_new(jsonObj,"Ts",json_integer(tv.tv_sec));
          json_object_set_new(jsonObj,"User",json_string(username));
          json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
          json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_SUCCESS"));
@@ -536,7 +536,7 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
             
          gettimeofday(&tv, NULL);
          json_object_set_new(jsonObj,"Type",json_string("auth"));
-         json_object_set_new(jsonObj,"TS",json_integer(tv.tv_sec));
+         json_object_set_new(jsonObj,"Ts",json_integer(tv.tv_sec));
          json_object_set_new(jsonObj,"User",json_string(username));
          json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
          json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_FAILED"));

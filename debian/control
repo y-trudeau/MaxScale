@@ -3,11 +3,11 @@ Maintainer: Timofey Turenko
 Section: misc
 Priority: optional
 Standards-Version: 3.9.2
-Build-Depends: debhelper (>= 8), gcc, g++, ncurses-dev, bison, build-essential, libssl-dev, libaio-dev, libmariadbclient-dev,  libmariadbd-dev, mariadb-server, cmake, perl, make, libtool,
+Build-Depends: debhelper (>= 8), gcc, g++, ncurses-dev, bison, build-essential, libssl-dev, libaio-dev, libmariadbclient-dev,  libmariadbd-dev, mariadb-server, cmake, perl, make, libtool, libjansson-dev
 
 Package: maxscale
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, libjansson4
 Description: MaxScale
  The SkySQL MaxScale is an intelligent proxy that allows forwarding of
  database statements to one or more database servers using complex rules,

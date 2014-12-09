@@ -90,7 +90,7 @@ static FILTER_OBJECT MyObject = {
  */
 typedef struct {
    	FILE  *fp;     /* Output file pointer */
-	int	sessions;	/* Session count */
+	unsigned int	sessions;	/* Session count */
 	char	*filepath;	/* Base of fielname to log into */
 	int   buffer_size;  /* buffer size in MB */
 	size_t  bufpos; /* Used amount in the buffer */

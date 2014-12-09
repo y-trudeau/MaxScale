@@ -216,6 +216,12 @@ kafkaOptions()
    /* get the kafka_options parameter */
    options = config_kafka_options();
    
+   LOGIF(LM, (skygw_log_write_flush(
+         LOGFILE_ERROR,
+         "INFO : Kafka configuration. "
+         " options returned = %s\n"
+         , options)));
+   
    optionItem = strtok(options, ";");
    while (optionItem)
    {

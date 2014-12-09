@@ -1115,7 +1115,7 @@ config_threadcount()
 char *
 config_kafka_options()
 {
-	return gateway.kafka_options;
+	return strdup(gateway.kafka_options);
 }
 
 
