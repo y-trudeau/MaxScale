@@ -40,6 +40,7 @@
  *					internal router suppression of messages
  * 30/10/14	Massimiliano Pinto	Added disable_master_failback parameter
  * 07/11/14	Massimiliano Pinto	Addition of monitor timeouts for connect/read/write
+ * 19/11/14 Yves Trudeau      Added kafka options
  *
  * @endverbatim
  */
@@ -1154,6 +1155,17 @@ config_threadcount()
 }
 
 /**
+ * Return the kafka options, the format is "option1=value1;option2=value2"
+ *
+ * @return The kafka options configured in the config file
+ */
+char *
+config_kafka_options()
+{
+	return strdup(gateway.kafka_options);
+}
+
+/**
  * Return the number of non-blocking polls to be done before a blocking poll
  * is issued.
  *
@@ -1202,6 +1214,9 @@ int i;
 	{
 		gateway.n_threads = atoi(value);
 	}
+   else if (!strcmp(name, "kafka_options")) {
+      gateway.kafka_options = strdup(value);
+   }
 	else if (strcmp(name, "non_blocking_polls") == 0)
 	{ 
 		gateway.n_nbpoll = atoi(value);
@@ -1209,7 +1224,7 @@ int i;
 	else if (strcmp(name, "poll_sleep") == 0)
 	{
 		gateway.pollsleep = atoi(value);
-        }
+   }
 	else
 	{
 		for (i = 0; lognames[i].logname; i++)
@@ -1233,6 +1248,7 @@ static void
 global_defaults()
 {
 	gateway.n_threads = 1;
+   gateway.kafka_options = NULL;
 	gateway.n_nbpoll = DEFAULT_NBPOLLS;
 	gateway.pollsleep = DEFAULT_POLLSLEEP;
 	if (version_string != NULL)

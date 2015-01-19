@@ -30,6 +30,7 @@
  * 07/05/14	Massimiliano Pinto	Added version_string to global configuration
  * 23/05/14	Massimiliano Pinto	Added id to global configuration
  * 17/10/14	Mark Riddoch		Added poll tuning configuration parameters
+ * 19/11/2014 Yves Trudeau     Added kafka support
  *
  * @endverbatim
  */
@@ -93,6 +94,7 @@ typedef struct	config_context {
  */
 typedef struct {
 	int			n_threads;		/**< Number of polling threads */
+   char        *kafka_options;  /**< Kafka options **/
 	char			*version_string;	/**< The version string of embedded database library */
 	unsigned long		id;			/**< MaxScale ID */
 	unsigned int		n_nbpoll;		/**< Tune number of non-blocking polls */
@@ -107,6 +109,7 @@ extern unsigned int config_pollsleep();
 CONFIG_PARAMETER*   config_get_param(CONFIG_PARAMETER* params, const char* name);
 config_param_type_t config_get_paramtype(CONFIG_PARAMETER* param);
 CONFIG_PARAMETER*   config_clone_param(CONFIG_PARAMETER* param);
+extern char * config_kafka_options();
 
 bool config_set_qualified_param(
         CONFIG_PARAMETER* param, 

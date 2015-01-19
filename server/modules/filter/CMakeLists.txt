@@ -24,6 +24,10 @@ add_library(topfilter SHARED topfilter.c)
 target_link_libraries(topfilter log_manager utils)
 install(TARGETS topfilter DESTINATION modules)
 
+add_library(genlogfilter SHARED genlogfilter.c)
+target_link_libraries(genlogfilter log_manager utils jansson)
+install(TARGETS genlogfilter DESTINATION modules)
+
 add_subdirectory(hint)
 
 if(BUILD_TESTS)
