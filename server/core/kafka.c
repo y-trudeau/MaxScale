@@ -43,6 +43,8 @@
 
 static void kafkaMsgDelivered (rd_kafka_t *,void *, size_t, int, void *, void *);
 static void kafkaLogger (const rd_kafka_t *,int,const char *, const char *);
+int kafkaAddBrokers();
+int kafkaConfigBrokersCount();
 void kafkaOptions();
 
 /* Global variables */
@@ -53,8 +55,10 @@ rd_kafka_t *rk = NULL;
 char  *brokers = NULL;
 char  *topicName = NULL;
 char  *applName = NULL;
-int   partition = -1;
+int   kafkaPartition = -1;
 int   hasKafka = 0;
+int   nBrokers = 0;
+struct timeval lastKafkaAddBrokers = (struct timeval){0};
 
 extern int lm_enabled_logfiles_bitmask;
 extern size_t         log_ses_count[];
@@ -91,13 +95,15 @@ kafkaInit()
    rd_kafka_set_log_level(rk, LOG_DEBUG);
 
    /* Add brokers */
-   if (rd_kafka_brokers_add(rk, brokers) == 0) {
+   if (kafkaAddBrokers(rk,brokers) == 0) {
       LOGIF(LE, (skygw_log_write_flush(
          LOGFILE_ERROR,
          "Error : Kafka, no valid brokers specified : %s "
          , brokers)));
-      exit(1);
+      hasKafka = 0;
+      return;
    }
+
 
    /* Create topic */
    rkt = rd_kafka_topic_new(rk, topicName, topic_conf);
@@ -106,14 +112,16 @@ kafkaInit()
          LOGFILE_ERROR,
          "Error : Kafka, unable to create the topic : %s "
          , topicName)));
-      exit(1);
+      hasKafka = 0;
+      return;
+
    }
    
    struct timeval		tv;
    int i;
    
-   /* Is the partition assigned */
-   if (partition < 1) 
+   /* Is the kafkaPartition assigned */
+   if (kafkaPartition < 0) 
    {
       const struct rd_kafka_metadata *metadata;
       const struct rd_kafka_metadata_topic *t;
@@ -123,17 +131,24 @@ kafkaInit()
       err = rd_kafka_metadata(rk, rkt ? 0 : 1, rkt,
                         &metadata, 2000);
       if (err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            fprintf(stderr,
-                  "%% Failed to acquire metadata: %s\n",
-                  rd_kafka_err2str(err));                  
+            LOGIF(LE, (skygw_log_write_flush(
+               LOGFILE_ERROR,
+               "Error : Kafka, Failed to acquire metadata : %s "
+               , rd_kafka_err2str(err))));
+            hasKafka = 0;
       }
       else 
       {
          i = 0;
          while (i < metadata->topic_cnt) {
             t = &metadata->topics[i];
-            if (!strcmp(topicName,t->topic))
+            if (!strcmp(topicName,t->topic)) {
+               LOGIF(LE, (skygw_log_write_flush(
+               LOGFILE_ERROR,
+               "Error : Kafka, listing topic : %s "
+               , t->topic)));
                break;
+            }
             i++;
          }
 
@@ -143,32 +158,48 @@ kafkaInit()
                "Error : Kafka, couldn't find the topic to set the partition : %s "
                , topicName)));
             rd_kafka_metadata_destroy(metadata);
-            exit(1);
+            hasKafka = 0;
+            return;
          }
-         
+                  
+         if (t->partition_cnt == 0) {
+            LOGIF(LE, (skygw_log_write_flush(
+               LOGFILE_ERROR,
+               "Error : Kafka, couldn't find the partition count for topic : %s "
+               , topicName)));
+            rd_kafka_metadata_destroy(metadata);
+            hasKafka = 0;
+            return;
+         }
+   
          gettimeofday(&tv, NULL);
-         partition = tv.tv_sec % t->partition_cnt; /* modulo to ts as a randomizer */
+         kafkaPartition = tv.tv_sec % t->partition_cnt; /* modulo to ts as a randomizer */
          if (!rd_kafka_topic_partition_available (rkt,
-                  partition))
-            partition = -1;
+                  kafkaPartition))
+            kafkaPartition = -1;
          else 
          {
             /* let's try the other partitions in order */
             i = 0;
-            while (i < t->partition_cnt && partition < 0) {
+            while (i < t->partition_cnt && kafkaPartition < 0) {
                if (rd_kafka_topic_partition_available (rkt,
                      i))
-                  partition = i;
+                  kafkaPartition = i;
                i++;
             }
          }
+         rd_kafka_metadata_destroy(metadata);
+         
+         hasKafka = 1;
       }
-      rd_kafka_metadata_destroy(metadata);
+   } 
+   else 
+   {
+      hasKafka = 1;
    }
       
-   if (partition < 0) partition = 0; /* fallback on 0 */
+   if (kafkaPartition < 0) kafkaPartition = 0; /* fallback on 0 */
    
-   hasKafka = 1;
 }
 
 /**
@@ -219,7 +250,7 @@ kafkaOptions()
    options = config_kafka_options();
    
    LOGIF(LM, (skygw_log_write_flush(
-         LOGFILE_ERROR,
+         LOGFILE_MESSAGE,
          "INFO : Kafka configuration. "
          " options returned = %s\n"
          , options)));
@@ -241,9 +272,9 @@ kafkaOptions()
       *val = '\0';
 		val++;
       
-      LOGIF(LT, (skygw_log_write_flush(
-         LOGFILE_TRACE,
-         "TRACE : Kafka configuration. "
+      LOGIF(LM, (skygw_log_write_flush(
+         LOGFILE_MESSAGE,
+         "Kafka configuration. "
          " processing %s with value %s\n"
          , name,val)));
    
@@ -262,6 +293,10 @@ kafkaOptions()
       {
          if (applName) free(applName);
          applName = strdup(val);
+      } 
+      else if (!strcmp(name, "partition"))
+      {
+         kafkaPartition = atoi(val);
       }
       else if (!strncmp(name, "topic.", strlen("topic.")))
       {
@@ -335,8 +370,12 @@ static void kafkaLogger (const rd_kafka_t *rk, int level,
 int kafkaProduce(char *buf)
 {
    int errno;
+
+   /* periodically check it there are missing brokers */
+   kafkaAddBrokers();
+
    /* Produce message. */
-   if ((errno = rd_kafka_produce(rkt, partition,
+   if ((errno = rd_kafka_produce(rkt, kafkaPartition,
               RD_KAFKA_MSG_F_FREE,
               /* Payload and length */
               buf, strlen(buf),
@@ -351,7 +390,7 @@ int kafkaProduce(char *buf)
          LOGFILE_ERROR,
          "Error : Failed to produce to topic %s "
          "partition %i",
-         rd_kafka_topic_name(rkt), partition,
+         rd_kafka_topic_name(rkt), kafkaPartition,
          rd_kafka_err2str(
             rd_kafka_errno2err(errno)))));
       /* Poll to handle delivery reports */
@@ -364,10 +403,38 @@ int kafkaProduce(char *buf)
 }
 
 /**
- * Return the ApplName used for kafka, convinience function
+ * Return the Application Name used for kafka, convenience function
  * 
  */
 char * kafkaGetApplName()
 {
    return applName;
+}
+
+
+int kafkaAddBrokers()
+{
+   struct timeval tv;
+   gettimeofday(&tv, NULL);    
+
+   if ((tv.tv_sec - lastKafkaAddBrokers.tv_sec) > 60 && nBrokers < kafkaConfigBrokersCount()) {
+      nBrokers = rd_kafka_brokers_add(rk, brokers);
+      gettimeofday(&lastKafkaAddBrokers, NULL);
+   }
+   return nBrokers;
+}
+
+int kafkaConfigBrokersCount()
+{
+   int count = 0;
+   char *ptr;
+   ptr = brokers;
+
+   if (*ptr) count=1;
+
+   while (*ptr) {
+      if (*ptr == ',') count +=1;
+      *ptr++;
+   }
+   return count;
 }

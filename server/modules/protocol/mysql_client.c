@@ -504,9 +504,24 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
 						sizeof(protocol->scramble),
                                                 username,
                                                 stage1_hash);
-
+        LOGIF(LD,
+                (skygw_log_write_flush(
+                        LOGFILE_DEBUG,
+                        "%lu [gw_mysql_do_authentication], password check auth_ret = %i",
+                        pthread_self(),
+                        auth_ret
+                        )));
+                                
 	/* check for database name match in resource hashtable */
 	auth_ret = check_db_name_after_auth(dcb, database, auth_ret);
+
+        LOGIF(LD,
+                (skygw_log_write_flush(
+                        LOGFILE_DEBUG,
+                        "%lu [gw_mysql_do_authentication], db check auth_ret = %i",
+                        pthread_self(),
+                        auth_ret
+                        )));
 
 	/* On failed auth try to load users' table from backend database */
 	if (auth_ret != 0) {
@@ -521,42 +536,59 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
 					sizeof(protocol->scramble), 
 					username, 
 					stage1_hash);
+                        
+                        LOGIF(LD,
+                                (skygw_log_write_flush(
+                                        LOGFILE_DEBUG,
+                                        "%lu [gw_mysql_do_authentication], password re-check auth_ret = %i",
+                                        pthread_self(),
+                                        auth_ret
+                                        )));
+                                        
+                        /* Do again the database check */
+                        auth_ret = check_db_name_after_auth(dcb, database, auth_ret);
+                        
+                        LOGIF(LD,
+                                (skygw_log_write_flush(
+                                        LOGFILE_DEBUG,
+                                        "%lu [gw_mysql_do_authentication], db re-check auth_ret = %i",
+                                        pthread_self(),
+                                        auth_ret
+                                        )));
 		}
 	}
 
-	/* Do again the database check */
-	auth_ret = check_db_name_after_auth(dcb, database, auth_ret);
 
 	/* on succesful auth set user into dcb field */
 	if (auth_ret == 0) {
                 dcb->user = strdup(client_data->user);
-
+                
                 if (hasKafka)
                 {
-                 struct	timeval  tv;
+                        struct	timeval  tv;
 
-                 pthread_mutex_lock(&jsonObjLock);
-                 if (!jsonObj)
-                    jsonObj = json_object();
-                 
-                 gettimeofday(&tv, NULL);
-                 json_object_set_new(jsonObj,"Type",json_string("auth"));
-                 json_object_set_new(jsonObj,"Ts",json_integer(tv.tv_sec));
-                 json_object_set_new(jsonObj,"User",json_string(username));
-                 json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
-                 json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_SUCCESS"));
-                 json_object_set_new(jsonObj,"Appl",json_string(kafkaGetApplName()));
-                 kafkaProduce(json_dumps(jsonObj,JSON_COMPACT));
-                 json_object_clear(jsonObj);
-                 pthread_mutex_unlock(&jsonObjLock);
+                        pthread_mutex_lock(&jsonObjLock);
+                        if (!jsonObj)
+                                jsonObj = json_object();
+
+                        gettimeofday(&tv, NULL);
+                        json_object_set_new(jsonObj,"Type",json_string("auth"));
+                        json_object_set_new(jsonObj,"Ts",json_integer(tv.tv_sec));
+                        json_object_set_new(jsonObj,"User",json_string(username));
+                        json_object_set_new(jsonObj,"Host",json_string(dcb->remote));
+                        json_object_set_new(jsonObj,"State",json_string("MYSQL_AUTH_SUCCESS"));
+                        json_object_set_new(jsonObj,"Appl",json_string(kafkaGetApplName()));
+                        kafkaProduce(json_dumps(jsonObj,JSON_COMPACT));
+                        json_object_clear(jsonObj);
+                        pthread_mutex_unlock(&jsonObjLock);
                 }
                 else 
                 {      
-                 LOGIF(LD, (skygw_log_write(
-                   LOGFILE_DEBUG,
-                   "gw_mysql_do_authentication, user = %s, host = %s, "
-                   "state = MYSQL_AUTH_SUCCESS.",
-                   username,dcb->remote)));
+                        LOGIF(LD, (skygw_log_write(
+                                LOGFILE_DEBUG,
+                                   "gw_mysql_do_authentication, user = %s, host = %s, "
+                                   "state = MYSQL_AUTH_SUCCESS.",
+                                   username,dcb->remote)));
                 }
          
 	} else {
@@ -567,7 +599,7 @@ static int gw_mysql_do_authentication(DCB *dcb, GWBUF *queue) {
                  
                         pthread_mutex_lock(&jsonObjLock);
                         if (!jsonObj)
-                        jsonObj = json_object();
+                                jsonObj = json_object();
 
                         gettimeofday(&tv, NULL);
                         json_object_set_new(jsonObj,"Type",json_string("auth"));

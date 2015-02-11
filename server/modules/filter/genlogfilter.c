@@ -97,16 +97,17 @@ typedef struct {
 	int   buffer_size;  /* buffer size in MB */
 	size_t  bufpos; /* Used amount in the buffer */
 	char  *buffer;  /* Write buffer */
-   long   queriesLogged;  /* number of queries logged */
+        long   queriesLogged;  /* number of queries logged */
 	struct timeval	lastFlush; /* last flush ops */
-   pthread_mutex_t  WriteLock; /* mutex protecting the write buffer and fp*/
+        pthread_mutex_t  WriteLock; /* mutex protecting the write buffer and fp*/
 	char	*host_re_def;	   /* host regex */
 	char	*user_re_def;		/* user regex */
 	char	*sql_re_def;		/* sql regex */
+        char  hostname[60];
 	regex_t	re_host;		/* Compiled regex for host */
-   regex_t	re_user;		/* Compiled regex for user */
-   regex_t	re_sql;		/* Compiled regex for sql */
-   char  *applname;       /* a prefix to sort the source of the log*/
+        regex_t	re_user;		/* Compiled regex for user */
+        regex_t	re_sql;		/* Compiled regex for sql */
+        char  *applname;       /* a prefix to sort the source of the log*/
 } GENLOG_INSTANCE;
 
 /**
@@ -120,15 +121,15 @@ typedef struct {
 typedef struct {
 	DOWNSTREAM	down;
 	UPSTREAM	up;
-   struct timeval start;
+        struct timeval start;
 	int		active;
-   int      isLogging;  /* bit set, 4 = user log, 2 = host log, 1 = sql log */
+        int      isLogging;  /* bit set, 4 = user log, 2 = host log, 1 = sql log */
 	unsigned int	sessionId;
 	char		*clientHost;
 	char		*userName;
 	char		*current;
-   json_t   *jsonObj;  /* allocated/deallocated in ClientReply */
-   char     *writeBuffer; /* allocated/deallocated in ClientReply */
+        json_t   *jsonObj;  /* allocated/deallocated in ClientReply */
+        char     *writeBuffer; /* allocated/deallocated in ClientReply */
 } GENLOG_SESSION;
 
 /**
@@ -185,16 +186,16 @@ createInstance(char **options, FILTER_PARAMETER **params)
 
 	if ((my_instance = calloc(1, sizeof(GENLOG_INSTANCE))) != NULL)
 	{      
-      my_instance->queriesLogged = 0;
+                my_instance->queriesLogged = 0;
 		my_instance->buffer_size = 1;
 	 	my_instance->bufpos = 0;
-      gettimeofday(&my_instance->lastFlush, NULL);
+                gettimeofday(&my_instance->lastFlush, NULL);
 		my_instance->filepath = strdup("/tmp/MaxScale_genlog.log");
-      my_instance->applname = strdup("MaxScale");
+                my_instance->applname = strdup("MaxScale");
 		my_instance->buffer = NULL;
 		my_instance->host_re_def = NULL;
 		my_instance->user_re_def = NULL;
-      my_instance->sql_re_def = NULL;
+                my_instance->sql_re_def = NULL;
 		pthread_mutex_init(&my_instance->WriteLock, NULL);
       
 		for (i = 0; params && params[i]; i++)
@@ -209,13 +210,10 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				free(my_instance->filepath);
 				my_instance->filepath = strdup(params[i]->value);
 			}
-         else if (!strcmp(params[i]->name, "applname"))
+                        else if (!strcmp(params[i]->name, "applname"))
 			{
-            free(my_instance->applname);
-            if (hasKafka)
-               my_instance->applname = strdup(kafkaGetApplName());
-            else
-            	my_instance->applname = strdup(params[i]->value);
+                                free(my_instance->applname);
+                                my_instance->applname = strdup(params[i]->value);
 			}
 			else if (!strcmp(params[i]->name, "host_re"))
 			{
@@ -301,9 +299,10 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				return NULL;
 			}
 		}
-         if ((my_instance->buffer = malloc(my_instance->buffer_size*1024+1)) 
-                  == NULL) 
-         {
+                
+                if ((my_instance->buffer = malloc(my_instance->buffer_size*1024+1)) 
+                        == NULL) 
+                {
 			LOGIF(LE, (skygw_log_write_flush(LOGFILE_ERROR,
 				"genfilter: Couldn't allocate the write buffer"
 				" os size %i\n",
@@ -532,78 +531,59 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 	struct		timeval		tv, diff;
 	char		*printformat = "# TS: %lu   Query_time: %.6f   User:%s   Host: %s  Session_id: %d   Appl:%s\n%s\n";
       
-   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-      "[GENLOG] clientReply")));
+        LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+                "[GENLOG] clientReply")));
       
 	if (my_session->current && my_session->isLogging == 1)
 	{
 		gettimeofday(&tv, NULL);
 		timersub(&tv, &(my_session->start), &diff);				
 
-      if (hasKafka) {
-   
-         if (1) {
-            
-            if (! my_session->jsonObj)
-               my_session->jsonObj = json_object();
-            
-            json_object_set_new(my_session->jsonObj,"Type",json_string("query"));
-            json_object_set_new(my_session->jsonObj,"Ts",json_integer(tv.tv_sec));
-            json_object_set_new(my_session->jsonObj,"QueryTime",json_real((double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000));
-            json_object_set_new(my_session->jsonObj,"User",json_string(my_session->userName));
-            json_object_set_new(my_session->jsonObj,"Host",json_string(my_session->clientHost));
-            json_object_set_new(my_session->jsonObj,"SessionId",json_integer(my_session->sessionId)); 
-            json_object_set_new(my_session->jsonObj,"Appl",json_string(my_instance->applname));
-            json_object_set_new(my_session->jsonObj,"Sql",json_string(my_session->current));
-            
-            if (kafkaProduce(json_dumps(my_session->jsonObj,JSON_COMPACT)))
-               __sync_fetch_and_add(&my_instance->queriesLogged, 1);
-            
-            json_object_clear(my_session->jsonObj);
-         }
-         else
-         {
-            char *msg;
-            asprintf(&msg,printformat,tv.tv_sec, 
-                  (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
-                  my_session->userName,my_session->clientHost,my_session->sessionId,
-                  my_instance->applname,my_session->current);
-            if (kafkaProduce(msg))
-               __sync_fetch_and_add(&my_instance->queriesLogged, 1);
-         }
-      }
-      else
-      {
-         /* approximate size, don't care to overshoot a bit */
-         LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-                  "[GENLOG] clientReply: Allocating a writeBuffer of %i\n",
-                  strlen(printformat)+
-                  strlen(my_session->userName)+strlen(my_session->clientHost)
-                  +strlen(my_instance->applname)+strlen(my_session->current)+30)));
-         
-          asprintf(&my_session->writeBuffer,printformat,tv.tv_sec, 
-                  (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
-                  my_session->userName,my_session->clientHost,my_session->sessionId,
-                  my_instance->applname,my_session->current);      
+                if (hasKafka) {
+                      
+                        if (! my_session->jsonObj)
+                        my_session->jsonObj = json_object();
 
-         pthread_mutex_lock(&my_instance->WriteLock);
-         if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
-         
-         /* Every 2s, close/open the log file for easy manipulation/rotation */
-         if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
-            fclose(my_instance->fp);
-            my_instance->fp = fopen(my_instance->filepath,"a");
-            gettimeofday(&my_instance->lastFlush, NULL);
-         }
-         fputs(my_session->writeBuffer,my_instance->fp);
-         pthread_mutex_unlock(&my_instance->WriteLock);
-         __sync_fetch_and_add(&my_instance->queriesLogged, 1);
-         free(my_session->writeBuffer);
-         
-      }
+                        json_object_set_new(my_session->jsonObj,"Type",json_string("query"));
+                        json_object_set_new(my_session->jsonObj,"Ts",json_integer(tv.tv_sec));
+                        json_object_set_new(my_session->jsonObj,"QueryTime",json_real((double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000));
+                        json_object_set_new(my_session->jsonObj,"User",json_string(my_session->userName));
+                        json_object_set_new(my_session->jsonObj,"Host",json_string(my_session->clientHost));
+                        json_object_set_new(my_session->jsonObj,"SessionId",json_integer(my_session->sessionId)); 
+                        json_object_set_new(my_session->jsonObj,"Appl",json_string(kafkaGetApplName()));
+                        json_object_set_new(my_session->jsonObj,"Sql",json_string(my_session->current));
+
+                        if (kafkaProduce(json_dumps(my_session->jsonObj,JSON_COMPACT)))
+                        __sync_fetch_and_add(&my_instance->queriesLogged, 1);
+
+                        json_object_clear(my_session->jsonObj);
+
+
+                }
+                else
+                {
+                        asprintf(&my_session->writeBuffer,printformat,tv.tv_sec, 
+                                (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
+                        my_session->userName,my_session->clientHost,my_session->sessionId,
+                        my_instance->applname,my_session->current);      
+
+                        pthread_mutex_lock(&my_instance->WriteLock);
+                        if (! my_instance->fp ) my_instance->fp = fopen(my_instance->filepath,"a");
+                 
+                        /* Every 2s, close/open the log file for easy manipulation/rotation */
+                        if ((tv.tv_sec - my_instance->lastFlush.tv_sec) > 1) {			
+                                fclose(my_instance->fp);
+                                my_instance->fp = fopen(my_instance->filepath,"a");
+                                gettimeofday(&my_instance->lastFlush, NULL);
+                        }
+                        fputs(my_session->writeBuffer,my_instance->fp);
+                        pthread_mutex_unlock(&my_instance->WriteLock);
+                        __sync_fetch_and_add(&my_instance->queriesLogged, 1);
+                        free(my_session->writeBuffer);
+                }
 	}
 
-   my_session->writeBuffer = NULL;
+        my_session->writeBuffer = NULL;
 	free(my_session->current);
 	my_session->current = NULL;
 

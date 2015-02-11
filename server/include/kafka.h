@@ -31,6 +31,7 @@
  * @endverbatim
  */
 
+#define KAFKA_INSTANCE_NAME_LENGTH 100
 
 extern void kafkaInit();
 extern void kafkaShutdown();
