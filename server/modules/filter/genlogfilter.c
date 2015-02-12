@@ -44,8 +44,10 @@
 #include <regex.h>
 #include <kafka.h>
 #include <jansson.h>
+#include <hashtable.h>
 
 #define USE_RE 0
+#define SESSIONS_HASHTABLE_DEFAULT_SIZE 1000
 
 extern int lm_enabled_logfiles_bitmask;
 extern size_t         log_ses_count[];
@@ -91,20 +93,21 @@ static FILTER_OBJECT MyObject = {
  * 
  */
 typedef struct {
-   	FILE  *fp;     /* Output file pointer */
-	unsigned int	sessions;	/* Session count */
-	char	*filepath;	/* Base of fielname to log into */
-	int   buffer_size;  /* buffer size in MB */
-	size_t  bufpos; /* Used amount in the buffer */
-	char  *buffer;  /* Write buffer */
+        FILE  *fp;     /* Output file pointer */
+        unsigned int	sessions;	/* Session count */
+        HASHTABLE*      sessions_table;
+        char	*filepath;	/* Base of fielname to log into */
+        int   buffer_size;  /* buffer size in MB */
+        size_t  bufpos; /* Used amount in the buffer */
+        char  *buffer;  /* Write buffer */
         long   queriesLogged;  /* number of queries logged */
-	struct timeval	lastFlush; /* last flush ops */
+        struct timeval	lastFlush; /* last flush ops */
         pthread_mutex_t  WriteLock; /* mutex protecting the write buffer and fp*/
-	char	*host_re_def;	   /* host regex */
-	char	*user_re_def;		/* user regex */
-	char	*sql_re_def;		/* sql regex */
+        char	*host_re_def;	   /* host regex */
+        char	*user_re_def;		/* user regex */
+        char	*sql_re_def;		/* sql regex */
         char  hostname[60];
-	regex_t	re_host;		/* Compiled regex for host */
+        regex_t	re_host;		/* Compiled regex for host */
         regex_t	re_user;		/* Compiled regex for user */
         regex_t	re_sql;		/* Compiled regex for sql */
         char  *applname;       /* a prefix to sort the source of the log*/
@@ -131,6 +134,70 @@ typedef struct {
         json_t   *jsonObj;  /* allocated/deallocated in ClientReply */
         char     *writeBuffer; /* allocated/deallocated in ClientReply */
 } GENLOG_SESSION;
+
+static int hashkeyfun(void* key);
+static int hashcmpfun (void *, void *);
+
+static int hashkeyfun(void* key)
+{
+        LOGIF(LE, (skygw_log_write_flush(
+                LOGFILE_ERROR,
+                "%lu [genlogfilter:hashkeyfun] add key = %lu, key = %u\n ",
+                pthread_self(),
+                key,*((unsigned int*) key))));
+                
+  int *iPtr = (int *) key;
+  /* no hash,  there can't be collision, session is a sequence */
+  int hKey = *iPtr * 1;
+  return hKey;
+}
+
+static int hashcmpfun(
+	void* v1,
+	void* v2)
+{
+        unsigned int* i1 = (unsigned int*) v1;
+        unsigned int* i2 = (unsigned int*) v2;
+
+        if (i1 == i2) 
+                return 0;
+        else
+                return 1;
+  
+}
+
+static void* hintdup(void* fval)
+{
+  /* Allocate and copy value */
+  unsigned int *newval = malloc(sizeof(unsigned int));
+  /* copy the value */
+  /* memcpy(newval, fval, sizeof(unsigned int));*/
+  *newval = *((unsigned int*) fval); 
+  
+  LOGIF(LE, (skygw_log_write_flush(
+                LOGFILE_ERROR,
+                "%lu [genlogfilter:hintdup] add fval = %lu, fval = %u, add newval = %lu, newval = %u\n ",
+                pthread_self(),
+                fval,*((unsigned int*) fval),
+                newval,*newval)));
+  return newval;
+}
+
+static void* hptrdup(void* fval)
+{
+  /* Allocate and copy the pointer value */
+  unsigned long *newval = malloc(sizeof(unsigned long));
+  *newval = (unsigned long) fval;
+  LOGIF(LE, (skygw_log_write_flush(
+                LOGFILE_ERROR,
+                "%lu [genlogfilter:hptrdup] add fval = %lu, fval = %lu, add newval = %lu, newval = %lu\n ",
+                pthread_self(),
+                fval,*((unsigned long*)fval),
+                newval,*newval)));
+  return newval;
+}
+
+
 
 /**
  * Implementation of the mandatory version entry point
@@ -181,8 +248,8 @@ createInstance(char **options, FILTER_PARAMETER **params)
 	int		i;
 	GENLOG_INSTANCE	*my_instance;
 
-   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-      "[GENLOG] createInstance")));
+        LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+                "[GENLOG] createInstance")));
 
 	if ((my_instance = calloc(1, sizeof(GENLOG_INSTANCE))) != NULL)
 	{      
@@ -244,8 +311,12 @@ createInstance(char **options, FILTER_PARAMETER **params)
 				"genlogfilter: Options are not supported by this "
 				" filter. They will be ignored\n")));
 		}
-		my_instance->sessions = 0;
 		
+                my_instance->sessions = 0;
+                my_instance->sessions_table = hashtable_alloc(SESSIONS_HASHTABLE_DEFAULT_SIZE, hashkeyfun, hashcmpfun);
+		hashtable_memory_fns(my_instance->sessions_table, (HASHMEMORYFN)hintdup, (HASHMEMORYFN)hptrdup, 
+                                        (HASHMEMORYFN)free, (HASHMEMORYFN)free);
+                
 		if (1) {
 			if (my_instance->host_re_def &&
 				regcomp(&my_instance->re_host, my_instance->host_re_def, REG_ICASE))
@@ -339,18 +410,18 @@ newSession(FILTER *instance, SESSION *session)
 	GENLOG_SESSION	*my_session;
 	char		*remote, *user;
 
-   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-      "[GENLOG] newSession")));
+        LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+                "[GENLOG] newSession")));
       
 	if ((my_session = calloc(1, sizeof(GENLOG_SESSION))) != NULL)
 	{
 		my_session->sessionId = my_instance->sessions;
-      my_instance->sessions++;
-      my_session->isLogging = 1;
-      my_session->jsonObj = NULL;
+                my_instance->sessions++;
+                my_session->isLogging = 1;
+                my_session->jsonObj = NULL;
 
-      if ((user = session_getUser(session)) != NULL)
-         my_session->userName = strdup(user);
+                if ((user = session_getUser(session)) != NULL)
+                        my_session->userName = strdup(user);
 		else
 			my_session->userName = NULL;
 
@@ -360,29 +431,40 @@ newSession(FILTER *instance, SESSION *session)
 			my_session->clientHost = NULL;
 
 		/* check is the user is excluded */
-      if (my_instance->user_re_def != NULL)
-         if (regexec(&my_instance->re_user, my_session->userName, 0, NULL, 0) == 0)
+                if (my_instance->user_re_def != NULL)
+                        if (regexec(&my_instance->re_user, my_session->userName, 0, NULL, 0) == 0)
 	 			my_session->isLogging =0;
       
 		if (USE_RE) {
-	   	if (my_instance->user_re_def != NULL)
+                        if (my_instance->user_re_def != NULL)
 				if (regexec(&my_instance->re_user, my_session->userName, 1, NULL, 0) == 0)
 		 			my_session->isLogging |= 1 << 4;
-	      	else
+                                else
 		 			my_session->isLogging &= ~(1 << 4);
 			else
 				my_session->isLogging |= 1 << 4;
 
-         if (my_instance->host_re_def != NULL && my_session->isLogging == 4 &&
-            regexec(&my_instance->re_host, my_session->clientHost, 1, NULL, 0) == 0)
-            my_session->isLogging |= 1 << 2;
-         else
-            my_session->isLogging &= ~(1 << 2);
+                if (my_instance->host_re_def != NULL && my_session->isLogging == 4 &&
+                        regexec(&my_instance->re_host, my_session->clientHost, 1, NULL, 0) == 0)
+                        my_session->isLogging |= 1 << 2;
+                else
+                        my_session->isLogging &= ~(1 << 2);
 		}		
 		my_session->current = NULL;
-      my_session->writeBuffer = NULL;
-      my_session->jsonObj = NULL;
+                my_session->writeBuffer = NULL;
+                my_session->jsonObj = NULL;
 		my_session->active = 1;
+                
+                unsigned int key = my_session->sessionId;
+                LOGIF(LE, (skygw_log_write_flush(
+                LOGFILE_ERROR,
+                "%lu [genlogfilter:newSession] hashtable_add: sessionId = %u, add sessionId = %lu, add my_session = %lu\n ",
+                pthread_self(),
+                key,
+                &key,
+                my_session)));
+                
+                hashtable_add(my_instance->sessions_table,(void *)&key,my_session);
 		
 	}
 
@@ -412,6 +494,7 @@ closeSession(FILTER *instance, void *session)
 static void
 freeSession(FILTER *instance, void *session)
 {
+   GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
    GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
 
    if (my_session->userName)
@@ -425,7 +508,9 @@ freeSession(FILTER *instance, void *session)
    if (my_session->jsonObj)
       json_delete(my_session->jsonObj);
       
-	free(session);
+      unsigned int key = my_session->sessionId;
+      hashtable_delete(my_instance->sessions_table,(void *)&key);
+      free(session);
    
    return;
 }
@@ -481,8 +566,8 @@ routeQuery(FILTER *instance, void *session, GWBUF *queue)
 	char		*ptr;
 	int		length;
 
-   LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
-      "[GENLOG] routeQuery")));
+        LOGIF(LD, (skygw_log_write_flush(LOGFILE_DEBUG,
+                "[GENLOG] routeQuery")));
       
 	modutil_extract_SQL(queue, &ptr, &length);
 	if (USE_RE) {
@@ -606,10 +691,12 @@ clientReply(FILTER *instance, void *session, GWBUF *reply)
 static	void
 diagnostic(FILTER *instance, void *fsession, DCB *dcb)
 {
-   
+        unsigned long *iter;
+        GENLOG_SESSION *my_session;        
+        struct		timeval		tv, diff;
 	GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
 
-		dcb_printf(dcb, "\t\tBuffer size (KB)		%d\n",
+        dcb_printf(dcb, "\t\tBuffer size (KB)		%d\n",
 				my_instance->buffer_size);
 	if (my_instance->host_re_def)
 		dcb_printf(dcb, "\t\tHost matching regex 	%s\n",
@@ -620,19 +707,42 @@ diagnostic(FILTER *instance, void *fsession, DCB *dcb)
 	if (my_instance->sql_re_def)
 		dcb_printf(dcb, "\t\tSql matching regex 	%s\n",
 				my_instance->sql_re_def);
-   if (hasKafka) {
-      dcb_printf(dcb, "\t\tLogging to Kakfa\n");   
-   }
-   else
-   {
-      if (my_instance->filepath)
-         dcb_printf(dcb, "\t\tLogging to file		%s\n",
-               my_instance->filepath);
+        if (hasKafka) {
+                dcb_printf(dcb, "\t\tLogging to Kakfa\n");   
+        }
+        else
+        {
+                if (my_instance->filepath)
+                        dcb_printf(dcb, "\t\tLogging to file		%s\n",
+                                my_instance->filepath);
                   
-      dcb_printf(dcb, "\t\tLast buffer flush		%s\n",
-         asctime(localtime(&my_instance->lastFlush.tv_sec)));
-   }
-   dcb_printf(dcb, "\t\tNumber of queries logged:	%li\n",
-      my_instance->queriesLogged);
+                        dcb_printf(dcb, "\t\tLast buffer flush		%s\n",
+                                asctime(localtime(&my_instance->lastFlush.tv_sec)));
+        }
+        
+        dcb_printf(dcb, "\t\tNumber of queries logged:	%li\n",
+        my_instance->queriesLogged);
+
+        dcb_printf(dcb, "\n\t\tActive sessions:	\n\n");
+   
+        HASHITERATOR *iterator = hashtable_iterator(my_instance->sessions_table);
+        gettimeofday(&tv, NULL);
+        unsigned long *luPtr;
+        while (1) {
+                iter = (int *)hashtable_next(iterator);
+                if (iter == NULL) break;
+                luPtr = (unsigned long *) hashtable_fetch(my_instance->sessions_table,iter);
+                my_session = (GENLOG_SESSION *) *luPtr;
+                if (my_session) { /* || my_session->current) { */
+                        timersub(&tv, &(my_session->start), &diff);
+                        dcb_printf(dcb, "\t\t\tId: %d   Running_time: %.6f   User:%s   Host: %s\n%s\n",
+                                my_session->sessionId,
+                                (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
+                                my_session->userName,
+                                my_session->clientHost,
+                                my_session->current); 
+                }
+        }
+        hashtable_iterator_free(iterator);
    
 }
