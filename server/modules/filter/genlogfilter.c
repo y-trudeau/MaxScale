@@ -139,13 +139,7 @@ static int hashkeyfun(void* key);
 static int hashcmpfun (void *, void *);
 
 static int hashkeyfun(void* key)
-{
-        LOGIF(LE, (skygw_log_write_flush(
-                LOGFILE_ERROR,
-                "%lu [genlogfilter:hashkeyfun] add key = %lu, key = %u\n ",
-                pthread_self(),
-                key,*((unsigned int*) key))));
-                
+{               
   int *iPtr = (int *) key;
   /* no hash,  there can't be collision, session is a sequence */
   int hKey = *iPtr * 1;
@@ -159,7 +153,7 @@ static int hashcmpfun(
         unsigned int* i1 = (unsigned int*) v1;
         unsigned int* i2 = (unsigned int*) v2;
 
-        if (i1 == i2) 
+        if (*i1 == *i2) 
                 return 0;
         else
                 return 1;
@@ -171,15 +165,8 @@ static void* hintdup(void* fval)
   /* Allocate and copy value */
   unsigned int *newval = malloc(sizeof(unsigned int));
   /* copy the value */
-  /* memcpy(newval, fval, sizeof(unsigned int));*/
   *newval = *((unsigned int*) fval); 
   
-  LOGIF(LE, (skygw_log_write_flush(
-                LOGFILE_ERROR,
-                "%lu [genlogfilter:hintdup] add fval = %lu, fval = %u, add newval = %lu, newval = %u\n ",
-                pthread_self(),
-                fval,*((unsigned int*) fval),
-                newval,*newval)));
   return newval;
 }
 
@@ -188,12 +175,6 @@ static void* hptrdup(void* fval)
   /* Allocate and copy the pointer value */
   unsigned long *newval = malloc(sizeof(unsigned long));
   *newval = (unsigned long) fval;
-  LOGIF(LE, (skygw_log_write_flush(
-                LOGFILE_ERROR,
-                "%lu [genlogfilter:hptrdup] add fval = %lu, fval = %lu, add newval = %lu, newval = %lu\n ",
-                pthread_self(),
-                fval,*((unsigned long*)fval),
-                newval,*newval)));
   return newval;
 }
 
@@ -455,17 +436,9 @@ newSession(FILTER *instance, SESSION *session)
                 my_session->jsonObj = NULL;
 		my_session->active = 1;
                 
-                unsigned int key = my_session->sessionId;
-                LOGIF(LE, (skygw_log_write_flush(
-                LOGFILE_ERROR,
-                "%lu [genlogfilter:newSession] hashtable_add: sessionId = %u, add sessionId = %lu, add my_session = %lu\n ",
-                pthread_self(),
-                key,
-                &key,
-                my_session)));
-                
+                /* add the session to the hash table */
+                unsigned int key = my_session->sessionId;                
                 hashtable_add(my_instance->sessions_table,(void *)&key,my_session);
-		
 	}
 
 	return my_session;
@@ -494,25 +467,26 @@ closeSession(FILTER *instance, void *session)
 static void
 freeSession(FILTER *instance, void *session)
 {
-   GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
-   GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
+        GENLOG_INSTANCE	*my_instance = (GENLOG_INSTANCE *)instance;
+        GENLOG_SESSION	*my_session = (GENLOG_SESSION *)session;
 
-   if (my_session->userName)
-      free(my_session->userName);
-   if (my_session->clientHost)
-      free(my_session->clientHost);
-   if (my_session->current)
-      free(my_session->current);
-   if (my_session->writeBuffer)
-      free(my_session->writeBuffer);
-   if (my_session->jsonObj)
-      json_delete(my_session->jsonObj);
-      
-      unsigned int key = my_session->sessionId;
-      hashtable_delete(my_instance->sessions_table,(void *)&key);
-      free(session);
+        if (my_session->userName)
+                free(my_session->userName);
+        if (my_session->clientHost)
+                free(my_session->clientHost);
+        if (my_session->current)
+                free(my_session->current);
+        if (my_session->writeBuffer)
+                free(my_session->writeBuffer);
+        if (my_session->jsonObj)
+                json_delete(my_session->jsonObj);
+
+        /* remove the session from the hash table */
+        unsigned int key = my_session->sessionId;
+        hashtable_delete(my_instance->sessions_table,(void *)&key);
+        free(session);
    
-   return;
+        return;
 }
 
 
@@ -723,19 +697,22 @@ diagnostic(FILTER *instance, void *fsession, DCB *dcb)
         dcb_printf(dcb, "\t\tNumber of queries logged:	%li\n",
         my_instance->queriesLogged);
 
-        dcb_printf(dcb, "\n\t\tActive sessions:	\n\n");
-   
         HASHITERATOR *iterator = hashtable_iterator(my_instance->sessions_table);
         gettimeofday(&tv, NULL);
         unsigned long *luPtr;
+        int first = 1;
         while (1) {
                 iter = (int *)hashtable_next(iterator);
                 if (iter == NULL) break;
                 luPtr = (unsigned long *) hashtable_fetch(my_instance->sessions_table,iter);
                 my_session = (GENLOG_SESSION *) *luPtr;
-                if (my_session) { /* || my_session->current) { */
+                if (my_session->current) { 
+                        if (first == 1) {
+                                dcb_printf(dcb, "\t\tActive sessions:	\n");
+                                first = 0;
+                        }
                         timersub(&tv, &(my_session->start), &diff);
-                        dcb_printf(dcb, "\t\t\tId: %d   Running_time: %.6f   User:%s   Host: %s\n%s\n",
+                        dcb_printf(dcb, "\t\t  Id:%d time:%.1f %s@%s sql:%.50s\n",
                                 my_session->sessionId,
                                 (double)((diff.tv_sec * 1000000)+(diff.tv_usec)) / 1000000,
                                 my_session->userName,
