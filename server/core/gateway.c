@@ -36,6 +36,7 @@
  *					Put example code behind SS_DEBUG macros.
  * 05/02/14	Mark Riddoch		Addition of version string
  * 29/06/14	Massimiliano Pinto	Addition of pidfile
+ * 19/11/14 Yves Trudeau      Added kafka support
  *
  * @endverbatim
  */
@@ -58,6 +59,7 @@
 #include <housekeeper.h>
 #include <service.h>
 #include <memlog.h>
+#include <kafka.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -1820,6 +1822,12 @@ int main(int argc, char **argv)
                 log_flush_cb,
                 (void *)&log_flush_timeout_ms);
 
+   /* 
+    * Start the handle to Kafka for logging
+    */
+   if (config_kafka_options()) 
+      kafkaInit();
+
 	/*
 	 * Start the housekeeper thread
 	 */
@@ -1896,6 +1904,7 @@ void
 shutdown_server()
 {
 	service_shutdown();
+   kafkaShutdown();
 	poll_shutdown();
 	hkshutdown();
 	memlog_flush_all();

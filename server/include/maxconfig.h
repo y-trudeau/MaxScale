@@ -31,6 +31,7 @@
  * 07/05/14	Massimiliano Pinto	Added version_string to global configuration
  * 23/05/14	Massimiliano Pinto	Added id to global configuration
  * 17/10/14	Mark Riddoch		Added poll tuning configuration parameters
+ * 19/11/14 	Yves Trudeau     	Added kafka support
  * 05/03/15	Massimiliano Pinto	Added sysname, release, sha1_mac to gateway struct
  *
  * @endverbatim
@@ -102,6 +103,7 @@ typedef struct {
 	char			sysname[_SYSNAME_STR_LENGTH];		/**< The release name string of the system */
 	uint8_t			mac_sha1[SHA_DIGEST_LENGTH];		/*< The SHA1 digest of an interface MAC address */
 	unsigned long		id;					/**< MaxScale ID */
+	char			*kafka_options;  	/**< Kafka options **/
 	unsigned int		n_nbpoll;		/**< Tune number of non-blocking polls */
 	unsigned int		pollsleep;		/**< Wait time in blocking polls */
 } GATEWAY_CONF;
@@ -116,6 +118,8 @@ config_param_type_t 	config_get_paramtype(CONFIG_PARAMETER* param);
 CONFIG_PARAMETER*	config_clone_param(CONFIG_PARAMETER* param);
 extern int		config_truth_value(char *);
 extern double           config_percentage_value(char *str);
+extern char*	    	config_kafka_options();
+
 bool config_set_qualified_param(
         CONFIG_PARAMETER* param, 
         void* val, 

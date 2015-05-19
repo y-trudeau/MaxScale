@@ -1,5 +1,5 @@
 add_library(MySQLClient SHARED mysql_client.c mysql_common.c)
-target_link_libraries(MySQLClient log_manager utils)
+target_link_libraries(MySQLClient log_manager utils jansson)
 install(TARGETS MySQLClient DESTINATION modules)
 
 add_library(MySQLBackend SHARED mysql_backend.c mysql_common.c)

@@ -40,6 +40,7 @@
  *					internal router suppression of messages
  * 30/10/14	Massimiliano Pinto	Added disable_master_failback parameter
  * 07/11/14	Massimiliano Pinto	Addition of monitor timeouts for connect/read/write
+ * 19/11/14 	Yves Trudeau   		Added kafka options
  * 20/02/15	Markus Mäkelä		Added connection_timeout parameter for services
  * 05/03/15	Massimiliano	Pinto	Added notification_feedback support
  * 20/04/15	Guillaume Lefranc	Added available_when_donor parameter
@@ -1240,6 +1241,21 @@ config_threadcount()
 }
 
 /**
+ * Return the kafka options, the format is "option1=value1;option2=value2"
+ *
+ * @return The kafka options configured in the config file
+ */
+char *
+config_kafka_options()
+{
+        if (gateway.kafka_options == NULL)
+        {
+                return NULL;
+        }
+	return strdup(gateway.kafka_options);
+}
+
+/**
  * Return the number of non-blocking polls to be done before a blocking poll
  * is issued.
  *
@@ -1298,6 +1314,9 @@ int i;
 	{
 		gateway.n_threads = atoi(value);
 	}
+	else if (!strcmp(name, "kafka_options")) {
+      		gateway.kafka_options = strdup(value);
+   	}
 	else if (strcmp(name, "non_blocking_polls") == 0)
 	{ 
 		gateway.n_nbpoll = atoi(value);
@@ -1373,6 +1392,7 @@ global_defaults()
 	uint8_t mac_addr[6]="";
 	struct utsname uname_data;
 	gateway.n_threads = 1;
+   gateway.kafka_options = NULL;
 	gateway.n_nbpoll = DEFAULT_NBPOLLS;
 	gateway.pollsleep = DEFAULT_POLLSLEEP;
 	if (version_string != NULL)
@@ -1609,7 +1629,7 @@ SERVER			*server;
 				}
 				else
 				{
-                    char *user;
+		                        char *user;
 					char *auth;
 					char *enable_root_user;
 					char *connection_timeout;

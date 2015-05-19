@@ -501,8 +501,8 @@ getDatabases(SERVICE *service, MYSQL *con)
 
 		LOGIF(LE, (skygw_log_write_flush(
 			LOGFILE_ERROR,
-            ERROR_NO_SHOW_DATABASES,
-            service->name, service_user)));
+            		ERROR_NO_SHOW_DATABASES,
+	                service->name, service_user)));
 	}
 
 	/* free resut set */

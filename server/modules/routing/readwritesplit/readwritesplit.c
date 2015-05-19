@@ -3682,7 +3682,7 @@ static mysql_sescmd_t* mysql_sescmd_init (
 
 static void mysql_sescmd_done(
 	mysql_sescmd_t* sescmd)
-{
+{       
 	CHK_RSES_PROP(sescmd->my_sescmd_prop);
 	gwbuf_free(sescmd->my_sescmd_buf);
         memset(sescmd, 0, sizeof(mysql_sescmd_t));
@@ -4375,7 +4375,7 @@ static bool route_session_write(
 	    rses_property_t *prop, *tmp;
 	    backend_ref_t* bref;
 	    bool conflict;
-
+        
 	    prop = router_cli_ses->rses_properties[RSES_PROP_TYPE_SESCMD];
 	    while(prop)
 	    {
@@ -4386,9 +4386,8 @@ static bool route_session_write(
 		    bref = &backend_ref[i];
 		    if(BREF_IS_IN_USE(bref))
 		    {
-
-			if(bref->bref_sescmd_cur.position <= prop->rses_prop_data.sescmd.position)
-			{
+			if(bref->bref_sescmd_cur.position <= prop->rses_prop_data.sescmd.position || sescmd_cursor_is_active(&bref->bref_sescmd_cur))
+			{                                   
 			    conflict = true;
 			    break;
 			}
@@ -4406,7 +4405,7 @@ static bool route_session_write(
 		prop = router_cli_ses->rses_properties[RSES_PROP_TYPE_SESCMD];
 	    }
 	}
-
+        
         /** 
          * Additional reference is created to querybuf to 
          * prevent it from being released before properties

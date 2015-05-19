@@ -5,8 +5,9 @@ else()
 endif()
 
 message(STATUS "CMake version: ${CMAKE_VERSION}")
+message(STATUS "CMake source dir: ${CMAKE_SOURCE_DIR}")
 
-include(macros.cmake)
+include(/root/git/MaxScale/macros.cmake)
 
 enable_testing()
 set_variables() 
@@ -195,7 +196,8 @@ if(PACKAGE)
 
     if(NOT ( ${DEBBUILD} STREQUAL "DEBBUILD-NOTFOUND" ) )
       set(CPACK_GENERATOR "${CPACK_GENERATOR};DEB")
-      execute_process(COMMAND dpgk --print-architecture OUTPUT_VARIABLE DEB_ARCHITECTURE)
+      execute_process(COMMAND dpkg --print-architecture OUTPUT_VARIABLE DEB_ARCHITECTURE)
+      string(REPLACE "\n" "" DEB_ARCHITECTURE ${DEB_ARCHITECTURE})
       set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE ${DEB_ARCHITECTURE})
       set (CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) 
       message(STATUS "Generating DEB packages for ${DEB_ARCHITECTURE}")

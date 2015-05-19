@@ -47,6 +47,10 @@ if(BUILD_TOOLS)
   install(TARGETS ruleparser DESTINATION tools)
 endif()
 
+add_library(genlogfilter SHARED genlogfilter.c)
+target_link_libraries(genlogfilter log_manager utils jansson)
+install(TARGETS genlogfilter DESTINATION modules)
+
 add_subdirectory(hint)
 
 if(BUILD_TESTS)
