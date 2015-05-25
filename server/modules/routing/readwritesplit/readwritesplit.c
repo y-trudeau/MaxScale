@@ -2107,10 +2107,15 @@ static bool route_single_stmt(
 	/**
 	 * Check if the query has anything to do with temporary tables.
 	 */
-	qtype = is_read_tmp_table(rses, querybuf, qtype);
-	check_create_tmp_table(rses, querybuf, qtype);
-	check_drop_tmp_table(rses, querybuf,qtype);
-	
+      if (0) {
+            if (master_dcb->session != NULL) {
+                  if (master_dcb->session->data != NULL) {
+                        qtype = is_read_tmp_table(rses, querybuf, qtype);
+                        check_create_tmp_table(rses, querybuf, qtype);
+                        check_drop_tmp_table(rses, querybuf,qtype);
+                  }
+            }
+      }
 	/**
 	 * If autocommit is disabled or transaction is explicitly started
 	 * transaction becomes active and master gets all statements until
